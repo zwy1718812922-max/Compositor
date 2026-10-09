@@ -1,0 +1,65 @@
+/* The new-document dialog follows the supplied desktop reference. */
+#new-dialog{width:min(1080px,calc(100vw - 40px));height:min(690px,calc(100vh - 36px));max-width:none;max-height:none;padding:0;border:1px solid #424242;border-radius:6px;background:#242424;color:#d5d5d5;box-shadow:0 22px 90px #0009}
+#new-form{height:100%;display:grid;grid-template-columns:minmax(0,1fr) 310px;grid-template-rows:48px minmax(0,1fr)}
+.new-tabs{grid-column:1/-1;display:flex;align-items:stretch;gap:25px;padding:0 26px;background:#323232;border-bottom:1px solid #404040;overflow-x:auto;scrollbar-width:thin}
+.new-tabs button{border-radius:0;padding:0;position:relative;color:#b8b8b8;font-size:13px;display:flex;align-items:center;gap:6px;flex:none}
+.new-tabs button:hover{background:transparent;color:#f0f0f0}
+.new-tabs button[aria-selected=true]{color:#fff}
+.new-tabs button[aria-selected=true]::after{content:"";position:absolute;height:2px;background:#fff;left:0;right:0;bottom:0}
+.new-tabs img{height:17px;width:17px}
+#new-dialog img{filter:invert(78%);display:block}
+.new-library{min-width:0;min-height:0;display:flex;flex-direction:column;background:#242424}
+.new-library-heading{height:47px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 26px;font-size:12px}
+.new-library-heading button{font-size:11px;color:#aeb9c8;padding:5px}
+.new-library-scroll{flex:1;overflow-y:auto;padding:0 16px 16px 26px;scrollbar-width:auto;scrollbar-color:#656565 #393939}
+#preset-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:15px 17px;align-content:start}
+.preset-card{height:167px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:12px 5px 19px;border:2px solid transparent;border-radius:3px;min-width:0;text-align:center;background:transparent}
+.preset-card:hover{background:#2b2b2b}
+.preset-card[aria-pressed=true]{border-color:#1682f8;box-shadow:0 0 0 1px #1682f8;background:#252525}
+.preset-card .preset-icon{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;width:100%;margin-bottom:7px}
+.preset-card img{object-fit:contain;height:80px;width:80px;opacity:.92}
+.preset-title{font-size:12px;font-weight:600;line-height:1.7;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.preset-size{font-size:11px;color:#bcbcbc;line-height:1.8;max-width:100%;white-space:nowrap}
+#preset-empty{color:#9f9f9f;font-size:12px;padding:70px 20px;text-align:center;line-height:2}
+.new-search{display:flex;align-items:center;height:48px;background:#303030;gap:14px;margin:0 26px 14px;padding:0 16px;flex:none}
+.new-search img{width:20px;height:20px;flex:none}
+.new-search input{flex:1;background:transparent;border:0;border-bottom:1px solid #494949;border-radius:0;padding:7px 0;font-size:12px;color:#d1d1d1}
+.new-search input::placeholder{color:#a0a0a0}
+.new-search button{padding:5px 18px;border:2px solid #aaa;border-radius:20px;color:#cfcfcf}
+.new-details{min-height:0;display:flex;flex-direction:column;background:#323232;padding:0 20px}
+.new-settings{flex:1;min-height:0;overflow-y:auto;padding:15px 0 6px;scrollbar-width:thin}
+.new-settings h1{font-size:12px;font-weight:400;color:#bcbcbc;margin:0 0 8px}
+.new-name-row{display:flex;align-items:center;gap:6px;margin-bottom:10px}
+.new-name-row input{height:33px;flex:1;background:transparent;border:0;border-bottom:1px solid #888;border-radius:0;padding:4px 2px;color:#eee}
+.new-name-row button{width:28px;height:30px;padding:3px;border-radius:3px}
+.new-name-row img{height:24px;width:24px}
+.new-field-label{display:block;margin:9px 0 5px;color:#b2b2b2;font-size:12px}
+#new-dialog input[type=number]{height:32px;width:72px;padding:6px 12px;background:#252525;border:1px solid #484848;border-radius:4px;color:#fafafa}
+#new-dialog select{height:32px;background:#303030;border:1px solid #494949;border-radius:4px;color:#d9d9d9;padding:5px 12px;font-size:13px}
+.new-value-row{display:flex;gap:12px;align-items:center}
+.new-value-row select{flex:1;min-width:0}
+.new-height-heading{display:grid;grid-template-columns:72px 62px 1fr;gap:12px;color:#b2b2b2;font-size:12px;margin:9px 0 5px}
+.new-height-row{display:flex;align-items:center;gap:12px;height:32px}
+.new-orientations{display:flex;gap:6px}
+.new-orientations button{width:26px;height:26px;padding:2px;border:1px solid #848484;border-radius:2px}
+.new-orientations img{width:20px;height:20px}
+.new-orientations button[aria-pressed=true]{background:#2185ec;border-color:#52a4ff}
+.new-orientations button[aria-pressed=true] img{filter:invert(100%)!important}
+.new-artboard{margin:0 0 0 1px;width:14px;height:14px;opacity:.6}
+.new-color-mode select:first-child{flex:1}.new-color-mode select:last-child{flex:none;width:90px}
+.new-background-row{display:flex;align-items:center;gap:13px}
+.new-background-row select{flex:1;min-width:0}
+#new-dialog #new-background-color{width:32px;height:32px;padding:0;border:1px solid #888;border-radius:3px;background:transparent;flex:none}
+#new-background-color::-webkit-color-swatch-wrapper{padding:0}#new-background-color::-webkit-color-swatch{border:0;border-radius:2px}
+.new-advanced{margin-top:10px}
+.new-advanced summary{font-size:12px;color:#b2b2b2;cursor:pointer}
+.new-advanced select{width:100%}
+#new-size-preview{position:absolute;top:0;left:0;font-size:10px;color:#9cabb6;line-height:1.8}
+#new-error{font-size:11px;line-height:1.7;color:#ffb4a8;margin:7px 0}
+#preset-status{font-size:11px;line-height:1.7;color:#8ac8ad;margin:7px 0}
+.new-actions{position:relative;height:88px;flex:none;display:flex;justify-content:flex-end;align-items:center;gap:16px}
+.new-actions button{padding:6px 19px;height:33px;border-radius:22px;border:2px solid #d4d4d4;color:#ededed;font-weight:600}
+.new-actions #create-document{background:#1478e9;border-color:#1478e9;color:#fff}
+.new-actions #create-document:hover{background:#238bff;border-color:#238bff}
+#new-dialog :focus-visible{outline:2px solid #61aaff;outline-offset:3px}
+@media(max-width:980px){#new-form{grid-template-columns:minmax(0,1fr) 290px}.new-tabs{gap:19px;padding:0 20px}.new-tabs button{font-size:12px}#preset-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.new-library-heading{padding:0 20px}.new-library-scroll{padding-left:20px}.new-search{margin-left:20px;margin-right:16px;padding:0 12px;gap:8px}}

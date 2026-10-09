@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-10",
+  "status": "implemented_and_validated",
+  "selected": 1,
+  "displayOrder": [
+    {
+      "number": 1,
+      "name": "经典工作区",
+      "image": "ps-ui-classic.png",
+      "generator": "built-in image_gen",
+      "generationFile": "exec-9c375ad7-a53c-49ff-9484-9290434dc44c.png"
+    },
+    {
+      "number": 2,
+      "name": "蒙版编辑工作区",
+      "image": "ps-ui-mask.png",
+      "generator": "built-in image_gen",
+      "generationFile": "exec-dbd30bf4-f1ce-48b7-bad2-19a0ee9b6532.png"
+    },
+    {
+      "number": 3,
+      "name": "图层管理工作区",
+      "image": "ps-ui-layers.png",
+      "generator": "built-in image_gen",
+      "generationFile": "exec-7425c210-aae9-4b85-9f92-9600cb1e5ab9.png"
+    }
+  ],
+  "references": [
+    "references/photoshop-windows-zh.png",
+    "references/compositor-0.3.png"
+  ],
+  "brief": "ps-style-brief.md",
+  "constraints": "The user selected option 1 before implementation. The 0.4.0 Windows release implements the approved gray UI, RGB 8-bit PSD exchange, pixel masks, groups and clipping, with explicit confirmation for unsupported PSD preview imports.",
+  "implementedVersion": "0.4.0"
+}

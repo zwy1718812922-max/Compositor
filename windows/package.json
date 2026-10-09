@@ -1,0 +1,62 @@
+{
+  "name": "compositor-windows-zh",
+  "version": "0.4.0",
+  "description": "Compositor 中文 Windows 桌面版",
+  "author": "Compositor contributors",
+  "license": "MIT",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs && playwright test",
+    "pack": "electron-builder --win --dir",
+    "dist": "electron-builder --win portable nsis"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.compositor.windows.zh",
+    "productName": "Compositor 中文版",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "project.cjs",
+      "image-metadata.cjs",
+      "psd.cjs",
+      "src/**/*",
+      "assets/*",
+      "LICENSE"
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "icon": "assets/icon.ico",
+      "signExecutable": false
+    },
+    "artifactName": "Compositor-ZH-${version}-${arch}.${ext}",
+    "portable": {
+      "artifactName": "Compositor-ZH-${version}-${arch}-Portable.${ext}"
+    },
+    "nsis": {
+      "artifactName": "Compositor-ZH-${version}-${arch}-Setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": [
+        "zh_CN"
+      ],
+      "language": "2052",
+      "createDesktopShortcut": true
+    }
+  },
+  "dependencies": {
+    "ag-psd": "31.0.3",
+    "pngjs": "7.0.0"
+  }
+}

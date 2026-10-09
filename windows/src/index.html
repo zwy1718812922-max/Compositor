@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Compositor 中文版</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="new-document.css">
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand-icon">C</span><nav id="menu-bar" aria-label="应用菜单"></nav>
+    <div class="document"><span id="document-name">未命名</span><span id="dirty-dot" hidden> ●</span></div>
+    <div class="window-actions"><button data-window="minimize" aria-label="最小化"><img src="icons/minus.svg" alt=""></button><button data-window="maximize" aria-label="最大化或还原"><img src="icons/rectangle.svg" alt=""></button><button data-window="close" aria-label="关闭窗口"><img src="icons/x.svg" alt=""></button></div>
+  </header>
+  <div class="optionsbar">
+    <strong id="tool-name">移动工具</strong><span class="separator"></span>
+    <span id="move-options"><label><input id="auto-select" type="checkbox">自动选择</label><select id="auto-select-mode" aria-label="自动选择类型"><option value="layer">图层</option><option value="group">组</option></select><label><input id="show-transform" type="checkbox" checked>显示变换控件</label></span>
+    <button id="text-options" hidden>文字属性…</button>
+    <label id="tool-color-label">颜色 <button id="tool-color" aria-label="选择前景颜色" title="选择前景颜色"></button></label>
+    <label id="gradient-color-option" hidden>终点 <input id="gradient-color" type="color" value="#ffffff" aria-label="渐变终点颜色"></label>
+    <label>大小 <input id="brush-size" type="number" value="20" min="1" max="500" aria-label="画笔大小"> px</label>
+    <label>硬度 <input id="brush-hardness" type="number" value="100" min="0" max="100" aria-label="画笔硬度"> %</label>
+    <label>不透明度 <input id="brush-opacity" type="range" value="100" min="1" max="100"><output id="brush-opacity-value">100%</output></label>
+    <span id="edit-target-label"></span><span class="spacer"></span>
+    <button data-command="undo" id="undo" title="撤销 Ctrl+Z" aria-label="撤销"><img src="icons/arrow-back-up.svg" alt=""></button><button data-command="redo" id="redo" title="重做 Ctrl+Shift+Z" aria-label="重做"><img src="icons/arrow-forward-up.svg" alt=""></button>
+  </div>
+  <main><nav class="tools" aria-label="工具栏"><button data-tool="move" title="移动工具 (V)" aria-label="移动工具"><img src="icons/arrows-move.svg" alt=""><small>V</small></button><button data-tool="select" title="矩形选区工具 (M)" aria-label="矩形选区工具"><img src="icons/border-style.svg" alt=""><small>M</small></button><button data-tool="crop" title="裁剪工具 (C)" aria-label="裁剪工具"><img src="icons/crop.svg" alt=""><small>C</small></button><button data-tool="eyedropper" title="吸管工具 (I)" aria-label="吸管工具"><img src="icons/color-picker.svg" alt=""><small>I</small></button><button data-tool="brush" title="画笔工具 (B)" aria-label="画笔工具"><img src="icons/brush.svg" alt=""><small>B</small></button><button data-tool="eraser" title="橡皮擦工具 (E)" aria-label="橡皮擦工具"><img src="icons/eraser.svg" alt=""><small>E</small></button><button data-tool="gradient" title="渐变工具 (G)" aria-label="渐变工具"><img src="icons/gradienter.svg" alt=""><small>G</small></button><button data-tool="text" title="文字工具 (T)" aria-label="文字工具"><img src="icons/typography.svg" alt=""><small>T</small></button><button data-tool="rect" title="矩形工具 (U)" aria-label="矩形工具"><img src="icons/rectangle.svg" alt=""><small>U</small></button><button data-tool="ellipse" title="椭圆工具 (O)" aria-label="椭圆工具"><img src="icons/circle.svg" alt=""><small>O</small></button><button data-tool="hand" title="抓手工具 (H)" aria-label="抓手工具"><img src="icons/hand-stop.svg" alt=""><small>H</small></button>
+    <div class="tool-divider"></div><button data-command="actual" title="实际像素" aria-label="实际像素"><img src="icons/zoom.svg" alt=""></button>
+    <div class="foreground-preview"><span id="background-swatch"></span><span id="foreground-swatch"><input id="color" type="color" value="#7aa2ff" aria-label="前景颜色"></span></div><button id="swap-colors" title="交换前景色与背景色 (X)" aria-label="交换前景色与背景色"><img src="icons/arrow-back-up.svg" alt=""></button>
+    <span class="spacer"></span><button data-command="help" title="使用说明" aria-label="使用说明"><img src="icons/question-mark.svg" alt=""></button>
+  </nav>
+  <section class="workspace">
+    <div class="canvas-tab"><span id="tab-name">未命名</span><span id="tab-zoom"> @ 100% (RGB/8)</span><span id="tab-size" hidden></span><span class="spacer"></span><button data-command="new" title="新建画布">新建</button><button data-command="import" title="导入图片">导入</button></div>
+    <div class="canvas-commands" hidden><button data-command="cropSelection" id="apply-crop">裁剪</button><button data-command="deselect" id="deselect">取消选区</button><span id="selection-size"></span></div>
+    <div class="ruler-workspace"><div class="ruler-corner"></div><canvas id="ruler-x"></canvas><canvas id="ruler-y"></canvas>
+      <div id="viewport" tabindex="0" aria-label="画布工作区"><div id="canvas-wrap"><canvas id="canvas" width="1280" height="800"></canvas><canvas id="overlay" width="1280" height="800"></canvas></div><div class="canvas-tip" id="canvas-tip">拖入图片，或选择工具开始创作</div></div>
+    </div>
+    <footer><button id="zoom-out" aria-label="缩小">−</button><button data-command="actual" id="zoom-value">100%</button><button id="zoom-in" aria-label="放大">＋</button><span id="dimensions">1280 × 800 px</span><span class="spacer"></span><span id="status" role="status">准备就绪</span><button data-command="fit">适合窗口</button></footer>
+  </section>
+  <nav class="panel-rail" aria-label="面板"><button data-panel="swatches" title="色板" aria-label="色板面板"><img src="icons/color-picker.svg" alt=""></button><button data-panel="properties" title="属性" aria-label="属性面板"><img src="icons/adjustments.svg" alt=""></button><button data-panel="mask" title="蒙版" aria-label="蒙版面板"><img src="icons/mask.svg" alt=""></button><button data-command="help" title="帮助" aria-label="面板帮助"><img src="icons/question-mark.svg" alt=""></button></nav>
+  <aside>
+    <section class="inspector"><div class="panel-tabs"><button data-panel="swatches" class="active">色板</button><button data-panel="properties">属性</button><button data-panel="mask">蒙版</button><span class="spacer"></span><img src="icons/dots.svg" alt=""></div>
+      <section id="swatches-panel"><input id="swatch-search" type="search" placeholder="搜索色板" aria-label="搜索色板"><div id="swatch-grid"></div><details open><summary>RGB</summary><div class="swatch-family" data-family="RGB"></div></details><details><summary>中性色</summary><div class="swatch-family" data-family="中性色"></div></details><details><summary>浅色</summary><div class="swatch-family" data-family="浅色"></div></details></section>
+      <section class="panel properties" id="properties-panel" hidden><div class="panel-heading"><h2>属性</h2><span id="layer-type">像素图层</span></div>
+        <div class="property-grid">
+          <label>X <input id="layer-x" type="number" step="1" aria-label="图层 X 坐标"></label><label>Y <input id="layer-y" type="number" step="1" aria-label="图层 Y 坐标"></label>
+          <label>缩放 <input id="layer-scale" type="number" min="1" max="10000" aria-label="图层缩放"> %</label><label>旋转 <input id="layer-rotation" type="number" aria-label="图层旋转"> °</label>
+        </div>
+        <div id="text-properties" hidden>
+          <label class="stack">文字内容<textarea id="text-content" rows="3" placeholder="输入文字，支持多行" maxlength="10000"></textarea></label>
+          <div class="text-style"><select id="font" aria-label="字体"><option value="Microsoft YaHei">微软雅黑</option><option value="SimSun">宋体</option><option value="SimHei">黑体</option><option value="Segoe UI">Segoe UI</option><option value="Arial">Arial</option></select><input id="font-size" type="number" min="1" max="1000" aria-label="字号"><button id="bold" title="粗体">B</button></div>
+          <label class="text-color">文字颜色 <input id="text-color" type="color" aria-label="文字颜色"></label>
+        </div>
+        <p id="property-hint">拖动画布中的图层来移动位置。</p>
+      </section>
+
+      <section id="mask-panel" hidden><div class="panel-heading"><h2>图层蒙版</h2><span id="mask-state">未添加</span></div><div id="mask-empty">添加蒙版后，用黑白画笔控制图层的显示范围。<button data-command="addMask">添加图层蒙版</button></div><div id="mask-controls" hidden><label class="mask-field">浓度 <input id="mask-density" type="range" min="0" max="100" value="100"><output id="mask-density-value">100%</output></label><label class="mask-field">羽化 <input id="mask-feather" type="number" min="0" max="100" step="0.5" value="0"> px</label><div class="mask-buttons"><button data-command="invertMask">反相</button><button data-command="toggleMask" id="mask-toggle">停用</button><button data-command="linkMask" id="mask-link">取消链接</button><button data-command="applyMask">应用</button><button data-command="deleteMask">删除</button></div><p>点击图层中的黑白缩略图编辑蒙版。黑色隐藏，白色显示；X 交换黑白。</p></div></section>
+    </section>
+    <section class="brush-panel"><div class="panel-tabs"><span>画笔</span><span class="spacer"></span><img src="icons/dots.svg" alt=""></div><label class="brush-size-label">大小：<input id="preset-size" type="range" min="1" max="500" value="20"><output id="preset-size-value">20 px</output></label><input id="brush-search" type="search" placeholder="搜索画笔" aria-label="搜索画笔"><details open><summary>常规画笔</summary><button class="brush-preset" data-hardness="0"><canvas width="240" height="45"></canvas><span>柔边圆</span></button><button class="brush-preset active" data-hardness="100"><canvas width="240" height="45"></canvas><span>硬边圆</span></button></details></section>
+    <section class="panel layers-panel"><div class="panel-tabs"><span>图层</span><span class="spacer"></span><span id="layer-count">1 个图层</span></div>
+    <div class="layer-filter"><img src="icons/search.svg" alt=""><input id="layer-search" placeholder="搜索图层" aria-label="搜索图层"><img src="icons/typography.svg" alt=""><img src="icons/photo.svg" alt=""></div>
+    <div class="layer-controls"><select id="blend" aria-label="混合模式"><option value="source-over">正常</option><option value="multiply">正片叠底</option><option value="screen">滤色</option><option value="overlay">叠加</option><option value="darken">变暗</option><option value="lighten">变亮</option><option value="difference">差值</option><option value="soft-light">柔光</option><option value="hard-light">强光</option><option value="pass-through">穿透（图层组）</option></select><label>不透明度 <input id="layer-opacity" type="number" min="0" max="100" value="100"> %</label></div>
+    <div class="layer-lock-info">锁定：<img src="icons/lock.svg" alt=""><span>Ctrl 单击多选 · 拖到组内</span></div>
+    <div id="layer-list" role="list" aria-label="图层列表"></div><div class="layer-actions"><button data-command="linkMask" aria-label="链接或取消链接蒙版" title="链接或取消链接蒙版"><img src="icons/link.svg" alt=""></button><button data-command="addMask" aria-label="添加图层蒙版" title="添加图层蒙版"><img src="icons/mask.svg" alt=""></button><button data-command="adjust" aria-label="图像调整" title="图像调整"><img src="icons/circle-half-2.svg" alt=""></button><button data-command="group" aria-label="创建图层组" title="创建图层组"><img src="icons/folder-plus.svg" alt=""></button><button data-command="addLayer" aria-label="新建图层" title="新建图层"><img src="icons/square-plus.svg" alt=""></button><button data-command="deleteLayer" aria-label="删除图层" title="删除图层"><img src="icons/trash.svg" alt=""></button></div></section>
+  </aside></main>
+  <dialog id="new-dialog" aria-label="新建画布">
+    <form id="new-form">
+      <nav class="new-tabs" role="tablist" aria-label="文档预设分类">
+        <button type="button" role="tab" data-category="recent" aria-selected="false"><img src="icons/clock.svg" alt="">最近使用项</button>
+        <button type="button" role="tab" data-category="saved" aria-selected="false">已保存</button>
+        <button type="button" role="tab" data-category="photo" aria-selected="false">照片</button>
+        <button type="button" role="tab" data-category="print" aria-selected="true">打印</button>
+        <button type="button" role="tab" data-category="art" aria-selected="false">图稿和插图</button>
+        <button type="button" role="tab" data-category="web" aria-selected="false">Web</button>
+        <button type="button" role="tab" data-category="mobile" aria-selected="false">移动设备</button>
+        <button type="button" role="tab" data-category="video" aria-selected="false">胶片和视频</button>
+      </nav>
+      <section class="new-library" role="tabpanel" aria-label="文档预设">
+        <div class="new-library-heading"><span id="preset-heading">空白文档预设 (14)</span><button type="button" id="delete-preset" hidden>删除选中预设</button></div>
+        <div class="new-library-scroll"><div id="preset-grid"></div><p id="preset-empty" hidden></p></div>
+        <div class="new-search"><img src="icons/search.svg" alt=""><input id="preset-search" type="search" placeholder="搜索预设名称或尺寸" aria-label="搜索预设"><button type="button" id="search-presets">搜索</button></div>
+      </section>
+      <section class="new-details" aria-label="预设详细信息">
+        <div class="new-settings">
+          <h1>预设详细信息</h1>
+          <div class="new-name-row"><input id="new-name" value="未标题-1" maxlength="100" aria-label="画布名称"><button type="button" id="save-preset" title="保存当前设置为预设" aria-label="保存预设"><img src="icons/download.svg" alt=""></button></div>
+          <label class="new-field-label" for="new-width">宽度</label>
+          <div class="new-value-row"><input id="new-width" type="number" value="8.5" min="0.000001" step="any" required aria-label="画布宽度"><select id="new-unit" aria-label="尺寸单位"><option value="px">像素</option><option value="in" selected>英寸</option><option value="mm">毫米</option><option value="cm">厘米</option><option value="pt">点</option></select></div>
+          <div class="new-height-heading"><label for="new-height">高度</label><span>方向</span><label class="new-artboard-label" title="当前版本支持单画布">画板</label></div>
+          <div class="new-height-row"><input id="new-height" type="number" value="11" min="0.000001" step="any" required aria-label="画布高度"><div class="new-orientations"><button type="button" id="portrait" aria-label="纵向" aria-pressed="true"><img src="icons/rectangle-vertical.svg" alt=""></button><button type="button" id="landscape" aria-label="横向" aria-pressed="false"><img src="icons/rectangle.svg" alt=""></button></div><input class="new-artboard" type="checkbox" disabled aria-label="画板（当前版本支持单画布）"></div>
+          <label class="new-field-label" for="new-resolution">分辨率</label>
+          <div class="new-value-row"><input id="new-resolution" type="number" value="300" min="1" max="9600" step="any" required aria-label="分辨率"><select id="new-resolution-unit" aria-label="分辨率单位"><option value="ppi">像素/英寸</option><option value="ppcm">像素/厘米</option></select></div>
+          <label class="new-field-label" for="new-color-mode">颜色模式</label>
+          <div class="new-value-row new-color-mode"><select id="new-color-mode" aria-label="颜色模式"><option>RGB 颜色</option></select><select id="new-bit-depth" aria-label="位深度"><option>8 bit</option></select></div>
+          <label class="new-field-label" for="new-background">背景内容</label>
+          <div class="new-background-row"><select id="new-background" aria-label="背景内容"><option value="#ffffff">白色</option><option value="#000000">黑色</option><option value="transparent">透明</option><option value="custom">自定义颜色</option></select><input id="new-background-color" type="color" value="#ffffff" aria-label="背景颜色"></div>
+          <details class="new-advanced" open><summary>高级选项</summary><label class="new-field-label" for="new-color-profile">颜色配置文件</label><select id="new-color-profile" aria-label="颜色配置文件"><option>工作中的 RGB: sRGB IEC61966-2.1</option></select><label class="new-field-label" for="new-pixel-aspect">像素长宽比</label><select id="new-pixel-aspect" aria-label="像素长宽比"><option>方形像素</option></select></details>
+          <p id="new-error" role="alert" hidden></p>
+          <p id="preset-status" role="status" hidden></p>
+        </div>
+        <div class="new-actions"><div id="new-size-preview" aria-live="polite"></div><button type="submit" id="create-document">创建</button><button type="button" data-dismiss>关闭</button></div>
+      </section>
+    </form>
+  </dialog>
+  <dialog id="export-dialog"><form id="export-form"><h1>导出图片</h1><p>按画布原始尺寸导出所有可见图层。</p><label class="stack">格式<select id="export-format"><option value="png">PNG · 保留透明背景</option><option value="jpeg">JPEG · 白色背景</option><option value="psd">PSD · 保留图层、组和蒙版（文字转像素）</option></select></label><label class="stack">JPEG 质量<input id="export-quality" type="range" min="10" max="100" value="92"></label><div class="dialog-actions"><button type="button" data-dismiss>取消</button><button class="primary" type="submit">选择保存位置</button></div></form></dialog>
+  <dialog id="psd-warning-dialog"><h1>打开 PSD 合成预览？</h1><p id="psd-warning-text"></p><p>此文件包含当前无法准确编辑的内容。合成预览会作为一个像素图层打开。</p><div class="dialog-actions"><button data-psd-choice="cancel">取消</button><button class="primary" data-psd-choice="flatten">打开预览</button></div></dialog>
+  <dialog id="confirm-dialog"><h1>保存当前修改？</h1><p>当前项目有未保存的修改。</p><div class="dialog-actions"><button data-choice="cancel">取消</button><button data-choice="discard">不保存</button><button class="primary" data-choice="save">保存</button></div></dialog>
+  <dialog id="size-dialog"><form id="size-form"><h1 id="size-title">图像大小</h1><p id="size-description"></p><div class="two-col"><label class="stack">宽度（像素）<input id="size-width" type="number" min="1" max="16384" step="1" required></label><label class="stack">高度（像素）<input id="size-height" type="number" min="1" max="16384" step="1" required></label></div><label class="stack" id="size-resolution-label">分辨率（ppi）<input id="size-resolution" type="number" min="1" max="9600" step="any" required></label><div id="size-anchor-option"><label class="stack">锚点<select id="size-anchor"><option value="0,0">左上</option><option value="0.5,0">上中</option><option value="1,0">右上</option><option value="0,0.5">左中</option><option value="0.5,0.5" selected>居中</option><option value="1,0.5">右中</option><option value="0,1">左下</option><option value="0.5,1">下中</option><option value="1,1">右下</option></select></label></div><p id="size-error" class="operation-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" data-dismiss>取消</button><button class="primary" type="submit">应用</button></div></form></dialog>
+  <dialog id="adjust-dialog"><form id="adjust-form"><h1>图像调整</h1><p>实时预览当前像素图层；有选区时仅修改选区内的像素。原图透明度保留，模糊会扩散边缘。</p><div class="adjust-controls"><label>亮度<input id="adjust-brightness" type="range" min="0" max="200" value="100"><output>100%</output></label><label>对比度<input id="adjust-contrast" type="range" min="0" max="200" value="100"><output>100%</output></label><label>饱和度<input id="adjust-saturation" type="range" min="0" max="200" value="100"><output>100%</output></label><label>色相<input id="adjust-hue" type="range" min="-180" max="180" value="0"><output>0°</output></label><label>灰度<input id="adjust-grayscale" type="range" min="0" max="100" value="0"><output>0%</output></label><label>反相<input id="adjust-invert" type="range" min="0" max="100" value="0"><output>0%</output></label><label>模糊<input id="adjust-blur" type="range" min="0" max="30" step="0.5" value="0"><output>0 px</output></label></div><div class="dialog-actions"><button type="button" id="adjust-reset">重置</button><span class="spacer"></span><button type="button" data-dismiss>取消</button><button class="primary" type="submit">应用</button></div></form></dialog>
+  <dialog id="help-dialog"><h1>让想法成为画面。</h1><p>Compositor 中文版 · Windows 编辑版</p><div class="help-grid"><span>移动 / 画笔 / 橡皮擦</span><kbd>V / B / E</kbd><span>文字 / 矩形 / 椭圆</span><kbd>T / U / O</kbd><span>选区 / 裁剪 / 渐变</span><kbd>M / C / G</kbd><span>全选 / 取消选区</span><kbd>Ctrl+A / Ctrl+D</kbd><span>应用裁剪 / 取消</span><kbd>Enter / Esc</kbd><span>复制可见画面 / 粘贴图片</span><kbd>Ctrl+Shift+C / Ctrl+Shift+V</kbd><span>填充 / 清除选区像素</span><kbd>Shift+F5 / Delete</kbd><span>撤销 / 重做</span><kbd>Ctrl+Z / Ctrl+Shift+Z</kbd><span>保存 / 导出</span><kbd>Ctrl+S / Ctrl+Shift+E</kbd><span>向下合并 / 合并可见图层</span><kbd>Ctrl+E / Ctrl+Shift+M</kbd><span>平移 / 缩放画布</span><kbd>空格拖动 / 滚轮</kbd></div><p>顶部菜单提供图像调整、图像大小和画布大小。双击图层名称可重命名；文字在右侧编辑。画笔和擦除也支持蒙版；图像调整用于像素图层，有选区时只修改选区内的像素。</p><p>项目使用 .ccomp 格式。支持 RGB 8 位分层 PSD、图层组、像素蒙版和剪贴蒙版。PSD 文字导入导出为像素；不支持的复杂效果可在确认后打开合成预览。尚不支持原版 .comp、PSB、CMYK、16/32 位或 RAW。</p><div class="dialog-actions"><button class="primary" data-dismiss>开始创作</button></div></dialog>
+  <div id="toast" role="alert" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+# Build output
+dist/
+build/
+DerivedData/
+*.xcarchive
+*.dmg
+
+# Xcode per-user state
+xcuserdata/
+*.xcuserstate
+
+# macOS
+.DS_Store
+
+# Signing material and secrets — never commit
+*.p12
+*.p8
+*.cer
+*.certSigningRequest
+.env
+
+# Claude Code settings personal to this machine
+.claude/settings.local.json
+BUILD_PLAN.md
+
+# Windows desktop port
+node_modules/
+windows/test-results/
+windows/playwright-report/
+
+# Generated validation artifacts and screenshots (scripts reproduce these)
+windows/validation/
+windows/*preview*.png
+windows/new-canvas-*.png
+windows/design/comparison-*.png
+
+# Local caches and machine-specific files
+__pycache__/
+*.pyc
+.venv/
+*.log
+Thumbs.db
+Desktop.ini
+.env.*
+!.env.example
+*.pem
+*.key
