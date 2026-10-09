@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('desktop', {
   pasteImage: () => ipcRenderer.invoke('image:paste'),
   setDirty: dirty => ipcRenderer.send('document:dirty', dirty),
   commitDocument: kind => ipcRenderer.send('document:commit', kind),
+  rendererReady: () => ipcRenderer.send('renderer:ready'),
   close: () => ipcRenderer.send('document:close'),
   onCommand: callback => { ipcRenderer.on('command', (_event, command) => callback(command)); }
 });

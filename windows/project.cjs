@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { validateStyles } = require('./src/effect-model.mjs');
 
 const FORMAT = 'com.compositor.windows';
 const MAX_BYTES = 128 * 1024 * 1024;
@@ -15,7 +16,7 @@ function pngPixels(data, limit = 16384) {
   return w * h;
 }
 function validateProject(p) {
-  if (!p || p.format !== FORMAT || ![1, 2, 3].includes(p.version)) throw new Error('不支持的项目格式或版本。请打开 .ccomp 项目。');
+  if (!p || p.format !== FORMAT || ![1, 2, 3, 4].includes(p.version)) throw new Error('不支持的项目格式或版本。请打开 .ccomp 项目。');
   const limit = p.version === 1 ? 4096 : 16384;
   if (![p.width, p.height].every(n => Number.isInteger(n) && number(n, 1, limit)) || p.width * p.height > 64 * 1024 * 1024) throw new Error('画布尺寸超过此项目版本的限制。');
   if (p.version >= 2 && (!number(p.resolution, 1, 9600) || p.colorSpace !== 'sRGB')) throw new Error('分辨率或颜色空间无效。');
@@ -30,10 +31,18 @@ function validateProject(p) {
     if (p.version < 3 && (l.mask || l.parentId || l.clipping)) throw new Error('蒙版、图层组和剪贴蒙版需要 v3 项目格式。');
     if (l.clipping !== undefined && typeof l.clipping !== 'boolean') throw new Error('剪贴蒙版标志无效。');
     if (l.parentId !== undefined && l.parentId !== null && typeof l.parentId !== 'string') throw new Error('图层组引用无效。');
+    if (p.version < 4 && (l.styles || l.fillOpacity !== undefined || l.textMode || l.textRasterCache)) throw new Error('图层样式和段落文字需要 v4 项目格式。');
+    if (l.styles) validateStyles(l.styles);
+    if (l.stylesEnabled !== undefined && typeof l.stylesEnabled !== 'boolean' || l.fillOpacity !== undefined && !number(l.fillOpacity, 0, 1)) throw new Error('图层样式或填充不透明度无效。');
+    for (const key of ['textRasterCache','stylesModified']) if (l[key] !== undefined && typeof l[key] !== 'boolean') throw new Error('文字缓存或样式修改标志无效。');
+    if (l.psdEffects && JSON.stringify(l.psdEffects).length > 65536) throw new Error('PSD 样式元数据过大。');
     if (l.type === 'raster') {
       pixels += pngPixels(l.data, limit);
     } else if (l.type === 'text') {
       if (typeof l.text !== 'string' || l.text.length > 10000 || typeof l.font !== 'string' || l.font.length > 200 || !number(l.fontSize, 1, 1000) || !/^#[\da-f]{6}$/i.test(l.color) || typeof l.bold !== 'boolean') throw new Error('文字图层信息无效。');
+      if (l.textMode !== undefined && !['point', 'paragraph'].includes(l.textMode) || l.align !== undefined && !['left', 'center', 'right'].includes(l.align) || l.lineHeight !== undefined && !number(l.lineHeight, .5, 5) || l.letterSpacing !== undefined && !number(l.letterSpacing, -100, 1000)) throw new Error('文字排版属性无效。');
+      if (l.textMode === 'paragraph' && (!number(l.boxWidth, 1, 16384) || !number(l.boxHeight, 1, 16384))) throw new Error('段落文字框尺寸无效。');
+      if (l.textRasterCache) pixels += pngPixels(l.data, limit);
     } else if (l.data !== undefined || l.x !== 0 || l.y !== 0 || l.scale !== 1 || l.rotation !== 0 || typeof l.collapsed !== 'boolean') throw new Error('图层组的变换或折叠状态无效。');
     if (l.mask) {
       const m = l.mask;

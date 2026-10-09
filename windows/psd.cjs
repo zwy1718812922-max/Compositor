@@ -2,6 +2,7 @@ const crypto = require('node:crypto');
 const { PNG } = require('pngjs');
 const { readPsd, writePsdBuffer, getLayerImageData, getLayerMaskImageData, getCompositeImageData, initializeCanvas } = require('ag-psd');
 const { validateProject, pngPixels, MAX_BYTES } = require('./project.cjs');
+const { importEffects, exportEffects, colorHex } = require('./psd-effects.cjs');
 const MAX_PIXELS = 64 * 1024 * 1024;
 initializeCanvas(() => { throw new Error('PSD 只能通过像素数据读取。'); }, (width, height) => {
   sizePixels(width, height); return { width, height, data: new Uint8ClampedArray(width * height * 4) };
@@ -59,14 +60,11 @@ function readPsdDocument(buffer) {
       if (pixels > MAX_PIXELS) throw new Error('PSD 图层与蒙版合计超过 6400 万像素。');
       if (!toCanvasBlend[node.blendMode || 'normal']) unsupported.add('未支持的混合模式');
       if (node.adjustment) unsupported.add('调整图层');
-      if (node.fillOpacity !== undefined && node.fillOpacity !== 1) unsupported.add('非默认填充不透明度');
       if (node.knockout || node.channelBlendingRestrictions?.length) unsupported.add('高级混合选项');
       if (node.blendingRanges && [node.blendingRanges.compositeGrayBlendSource, node.blendingRanges.compositeGraphBlendDestinationRange, ...node.blendingRanges.ranges.flatMap(r => [r.sourceRange, r.destRange])].some(range => range && range.some((v, i) => v !== [0,0,255,255][i]))) unsupported.add('混合颜色带');
-      if (node.effects && !node.effects.disabled) unsupported.add('图层效果');
       if (node.vectorMask || node.vectorFill || node.vectorStroke || node.realMask) unsupported.add('矢量或双重蒙版');
       if (node.placedLayer) unsupported.add('智能对象');
       if (node.artboard) unsupported.add('画板');
-      if (node.text) warnings.add('PSD 文字按独立像素图层导入以保留外观；可编辑文字请保存在 .ccomp 项目中。');
       if (node.text && (!node.right || !node.bottom || node.right === node.left || node.bottom === node.top)) unsupported.add('未缓存外观的文字图层');
       if ((node.mask?.userMaskFeather || 0) > 100) unsupported.add('超过当前范围的蒙版羽化');
       if (node.children && node.blendMode === 'pass through' && node.clipping) unsupported.add('参与剪贴的穿透图层组');
@@ -78,12 +76,12 @@ function readPsdDocument(buffer) {
   let resolution = psd.imageResources?.resolutionInfo?.horizontalResolution || 72;
   if (psd.imageResources?.resolutionInfo?.horizontalResolutionUnit === 'PPCM') resolution *= 2.54;
   resolution = Math.max(1, Math.min(9600, resolution));
-  const project = { format: 'com.compositor.windows', version: 3, width: psd.width, height: psd.height, resolution, colorSpace: 'sRGB', layers: [], activeId: '' };
-  if (unsupported.size || !count) {
+  const project = { format: 'com.compositor.windows', version: 4, width: psd.width, height: psd.height, resolution, colorSpace: 'sRGB', layers: [], activeId: '' };
+  if (!count) {
     const pixels = getCompositeImageData(psd);
     if (!pixels) throw new Error('PSD 包含未支持的内容，且没有可用的合成预览。请先栅格化相关图层。');
     const layer = { ...base('PSD 合成图', 'raster'), data: dataURL(pixels) }; project.layers = [layer]; project.activeId = layer.id;
-    return { project: validateProject(project), requiresFlatten: Boolean(unsupported.size), warnings: [...unsupported].map(s => '含' + s), source: 'psd' };
+    return { project: validateProject(project), requiresFlatten: false, warnings: ['此 PSD 本身没有独立图层记录，已打开文件内的合成图。'], source: 'psd' };
   }
   const convert = (nodes, parentId = null) => {
     // ag-psd 31 stores siblings bottom-to-top; verify with independent recomposition.
@@ -93,7 +91,24 @@ function readPsdDocument(buffer) {
       else {
         const bitmap = getLayerImageData(node);
         l.data = bitmap ? dataURL(bitmap) : dataURL({ width: 1, height: 1, data: new Uint8Array(4) });
+        if (node.text) {
+          const t = node.text, style = t.style || t.styleRuns?.[0]?.style || {}, runs = t.styleRuns || [], matrix = t.transform || [1,0,0,1,0,0];
+          const simple = t.orientation !== 'vertical' && !t.warp?.style?.match(/^(?!none$).+/) && runs.every(r => JSON.stringify({ ...style, ...r.style }) === JSON.stringify(style)) && Math.abs(matrix[1] || 0) < .0001 && Math.abs(matrix[2] || 0) < .0001 && Math.abs((matrix[0] || 1) - (matrix[3] || 1)) < .0001;
+          if (simple) {
+            Object.assign(l, { type: 'text', text: t.text.replace(/\r/g, '\n').replace(/\n$/, ''), font: (style.font?.name || 'Microsoft YaHei').replace(/-?(Regular|Bold|Italic|MT)$/g, '').replace(/^MicrosoftYaHei$/, 'Microsoft YaHei'), psdFont: style.font?.name, fontSize: Math.max(1, Math.min(1000, (style.fontSize || 64) * Math.abs(matrix[0] || 1))), color: colorHex(style.fillColor), bold: Boolean(style.fauxBold || /Bold/i.test(style.font?.name || '')), textMode: t.shapeType === 'box' ? 'paragraph' : 'point', align: ['left','center','right'].includes(t.paragraphStyle?.justification) ? t.paragraphStyle.justification : 'left', textRasterCache: Boolean(bitmap) });
+            l.psdTextSource = t; l.textCacheOrigin = { x:l.x,y:l.y };
+            if (l.textMode === 'paragraph') { l.boxWidth = Math.max(1, Math.min(16384, (t.boxBounds?.[2] - t.boxBounds?.[0]) || bitmap?.width || 300)); l.boxHeight = Math.max(1, Math.min(16384, (t.boxBounds?.[3] - t.boxBounds?.[1]) || bitmap?.height || 200)); }
+            if (!bitmap) { l.x = matrix[4] || 0; l.y = (matrix[5] || 0) - l.fontSize; delete l.data; }
+            warnings.add('水平单样式文字保持可编辑；首次编辑会使用本机字体重新排版。');
+          } else warnings.add(`「${l.name}」的混合样式、变形或竖排文字已单独转为像素层，其他图层保留。`);
+        }
       }
+      if (node.fillOpacity !== undefined) l.fillOpacity = node.fillOpacity;
+      if (node.effects) { l.styles = importEffects(node.effects, resolution, warnings, l.name); l.stylesEnabled = !node.effects.disabled; l.psdEffects = node.effects; }
+      if (node.adjustment) warnings.add(`「${l.name}」调整图层保留为独立占位层，调整计算暂不支持，画面可能与 PS 不同。`);
+      if (node.placedLayer) warnings.add(`「${l.name}」智能对象使用其独立缓存像素，仍是单独图层。`);
+      if (node.vectorMask || node.vectorFill || node.vectorStroke || node.realMask) warnings.add(`「${l.name}」的矢量或双重蒙版未完整重现，请对照合成预览。`);
+      if (l.type === 'group' && l.clipping && l.blend === 'pass-through') l.blend = 'source-over';
       if (node.mask) {
         const bitmap = getLayerMaskImageData(node), color = node.mask.defaultColor ?? 255;
         l.mask = { x: node.mask.left || 0, y: node.mask.top || 0, scale: 1, rotation: 0, defaultColor: color, enabled: !node.mask.disabled, linked: true, density: node.mask.userMaskDensity ?? 1, feather: Math.min(100, node.mask.userMaskFeather || 0), data: dataURL(bitmap || { width: 1, height: 1, data: new Uint8Array([color, color, color, 255]) }, true) };
@@ -102,7 +117,9 @@ function readPsdDocument(buffer) {
     }
   };
   convert(psd.children); project.activeId = project.layers.at(-1).id;
-  return { project: validateProject(project), warnings: [...warnings], source: 'psd', requiresFlatten: false };
+  let preview;
+  if (unsupported.size) { const bitmap = getCompositeImageData(psd); if (bitmap) preview = { ...project, layers: [{ ...base('PSD 合成图', 'raster'), data: dataURL(bitmap) }] }; if (preview) preview.activeId = preview.layers[0].id; }
+  return { project: validateProject(project), preview, warnings: [...unsupported].map(s => '含' + s + '：已保留图层，相关外观可能不同。').concat([...warnings]), source: 'psd', requiresFlatten: false, requiresConversion: unsupported.size > 0 };
 }
 function writePsdDocument(project, composite) {
   validateProject(project); pngPixels(composite);
@@ -113,6 +130,9 @@ function writePsdDocument(project, composite) {
     const node = { name: l.name, left: Math.round(l.x), top: Math.round(l.y), blendMode: toPsdBlend[l.blend], opacity: l.opacity, hidden: !l.visible, clipping: Boolean(l.clipping), protected: { composite: l.locked, position: l.locked, transparency: l.locked }, transparencyProtected: l.locked };
     if (l.type === 'group') { node.children = tree(l.id); node.opened = !l.collapsed; }
     else node.imageData = pixelData(l.data);
+    if (l.psdText) node.text = l.psdText;
+    if (l.fillOpacity !== undefined) node.fillOpacity = l.fillOpacity;
+    if (l.styles || l.psdEffects) node.effects = exportEffects(l);
     if (l.mask) {
       const m = l.mask;
       node.mask = { left: Math.round(m.x), top: Math.round(m.y), defaultColor: m.defaultColor, disabled: !m.enabled, positionRelativeToLayer: false, userMaskDensity: m.density, userMaskFeather: m.feather, imageData: pixelData(m.data) };

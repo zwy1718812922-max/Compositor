@@ -1,3 +1,4 @@
+import { hasEffects } from './effect-model.mjs';
 import { canvas, groupLayer, layerSurface, invalidatePixels, updateLinkedMask, transformPoint, layerTransform } from './editor.js';
 import { checkSize } from './operations.js';
 import { childrenOf, descendants, ancestors, canonicalize, moveSibling, isLocked } from './layer-tree.js';
@@ -46,6 +47,7 @@ function cloneLayer(layer, idMap) {
     copy.mask = { ...layer.mask, canvas: canvas(layer.mask.canvas.width, layer.mask.canvas.height), _surface: undefined };
     copy.mask.canvas.getContext('2d').drawImage(layer.mask.canvas, 0, 0);
   }
+  if (layer.styles) copy.styles = structuredClone(layer.styles);
   return copy;
 }
 export function advancedCommand(action, state) {
@@ -76,7 +78,7 @@ export function advancedCommand(action, state) {
       ctx.putImageData(image, 0, 0); m.defaultColor = 255 - m.defaultColor; invalidatePixels(m);
     } else if (action === 'applyMask') {
       const next = { ...layer, type: 'raster', canvas: layerSurface(project, layer), x: 0, y: 0, scale: 1, rotation: 0 };
-      for (const key of ['mask', 'text', 'font', 'fontSize', 'bold', 'color', 'data']) delete next[key];
+      for (const key of ['mask', 'text', 'font', 'fontSize', 'bold', 'color', 'data', 'styles', 'psdEffects', 'textRasterCache', 'psdTextSource', 'textMode', 'fillOpacity']) delete next[key];
       project.layers[project.layers.indexOf(layer)] = next; setTarget('image');
     } else { delete layer.mask; setTarget('image'); }
     changed(action === 'applyMask' ? '蒙版已应用为像素，可撤销恢复' : '已更新图层蒙版');
@@ -99,7 +101,7 @@ export function advancedCommand(action, state) {
     chosen.forEach(l => { l.parentId = group.id; }); canonicalize(project); project.activeId = group.id; selected.clear(); selected.add(group.id); setTarget('image'); changed('已创建图层组；可拖动图层到文件夹，Ctrl 单击多选');
   } else if (action === 'ungroup') {
     if (layer.type !== 'group') throw new Error('请选择图层组。');
-    if (layer.mask || layer.opacity !== 1 || layer.blend !== 'pass-through' || !layer.visible || layer.clipping) throw new Error('请先恢复组的穿透、100% 不透明度并移除组蒙版，才能取消分组而保持外观。');
+    if (layer.mask || hasEffects(layer) || (layer.fillOpacity ?? 1) !== 1 || layer.opacity !== 1 || layer.blend !== 'pass-through' || !layer.visible || layer.clipping) throw new Error('请先恢复组的穿透、100% 不透明度并移除组蒙版、图层样式及填充效果，才能取消分组而保持外观。');
     const children = childrenOf(project, layer.id);
     if (project.layers.length === 1) throw new Error('至少保留一个图层。');
     checkpoint(); children.forEach(l => { l.parentId = layer.parentId || null; }); project.layers = project.layers.filter(l => l !== layer); canonicalize(project);

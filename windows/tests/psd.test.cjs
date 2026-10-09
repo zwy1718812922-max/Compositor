@@ -24,9 +24,9 @@ test('PSD 分层往返保留中文组、叠放顺序、剪贴关系、位置与�
   assert.deepEqual(Array.from(PNG.sync.read(Buffer.from(mask.data.slice(22), 'base64')).data), Array.from(PNG.sync.read(Buffer.from(base.mask.data.slice(22), 'base64')).data));
   const raw = readPsd(output, { useImageData: true }); assert.deepEqual(Array.from(raw.imageData.data.slice(0,4)), [80,100,140,255]);
 });
-test('复杂 PSD 请求预览确认，拒绝 PSB、CMYK、16 位、损坏和超大文件', () => {
-  const source = psdFixture({ children: [{ name: '复杂混合', blendMode: 'color dodge', imageData: bitmap(8,6,[100,100,100,255]) }] });
-  const flattened = readPsdDocument(source); assert.equal(flattened.requiresFlatten, true); assert.equal(flattened.project.layers.length, 1); assert.match(flattened.warnings.join(''), /混合模式/);
+test('复杂 PSD 保留图层并提供独立合成预览，拒绝非法位深及损坏文件', () => {
+  const source = psdFixture({ children: [{ name:'背景',imageData:bitmap(8,6,[1,2,3,255]) },{ name: '复杂混合', blendMode: 'color dodge', imageData: bitmap(8,6,[100,100,100,255]) }] });
+  const imported = readPsdDocument(source); assert.equal(imported.requiresFlatten, false); assert.equal(imported.requiresConversion, true); assert.deepEqual(imported.project.layers.map(l=>l.name),['背景','复杂混合']); assert.equal(imported.preview.layers.length,1); assert.match(imported.warnings.join(''), /混合模式/);
   for (const [offset, value] of [[4,2],[22,16],[24,4]]) { const b = Buffer.from(psdFixture()); b.writeUInt16BE(value, offset); assert.throws(() => readPsdDocument(b)); }
   assert.throws(() => readPsdDocument(Buffer.from('not a psd')));
   const b = Buffer.from(psdFixture()); b.writeUInt32BE(20000,18); assert.throws(() => readPsdDocument(b));
@@ -36,6 +36,15 @@ test('复杂 PSD 请求预览确认，拒绝 PSB、CMYK、16 位、损坏和超�
   const size = Buffer.alloc(4); size.writeUInt32BE(resourceLength + block.length);
   const tagged = Buffer.concat([original.subarray(0,start),size,block,original.subarray(start+4)]);
   assert.throws(() => readPsdDocument(tagged), /sRGB/);
+});
+
+test('PSD 原生 FX 和水平文字保持分层及可编辑元数据，往返不丢失效果', () => {
+  const source = psdFixture({ children:[{name:'底层',imageData:bitmap(8,6,[1,2,3,255])},{name:'文字标题',imageData:bitmap(3,2,[255,255,255,255]),text:{text:'中文',transform:[1,0,0,1,2,4],style:{font:{name:'MicrosoftYaHei'},fontSize:12,fillColor:{r:255,g:255,b:255}}},effects:{scale:1,dropShadow:[{enabled:true,color:{r:0,g:0,b:0},opacity:.4,angle:120,distance:{units:'Pixels',value:3},size:{units:'Pixels',value:0},blendMode:'multiply'}]}}] });
+  const imported = readPsdDocument(source), l=imported.project.layers[1];
+  assert.equal(imported.project.layers.length,2); assert.equal(imported.requiresConversion,false); assert.equal(l.type,'text'); assert.equal(l.text,'中文'); assert.equal(l.styles.dropShadow.enabled,true); assert.equal(l.styles.dropShadow.size,0);
+  const prepared=structuredClone(imported.project); prepared.layers[1].type='raster'; prepared.layers[1].psdText=l.psdTextSource;
+  const bytes=writePsdDocument(prepared,toPNG(bitmap(8,6,[0,0,0,255]))), restored=readPsdDocument(bytes);
+  assert.equal(restored.project.layers[1].type,'text'); assert.equal(restored.project.layers[1].text,'中文'); assert.equal(restored.project.layers[1].styles.dropShadow.opacity,.4);
 });
 test('v3 拒绝不存在的组、循环层级、失效蒙版及过深嵌套', () => {
   const original = readPsdDocument(psdFixture()).project;

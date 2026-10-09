@@ -2,7 +2,7 @@
 
 本地版本管理说明见 [Git 工作流程](docs/git-workflow.zh-CN.md)。
 
-> **中文 Windows 11 版 0.4.0（本地移植）**：见 [使用说明](windows/README.zh-CN.md)。双击仓库根目录的 `启动中文版.cmd`，或运行 `windows/dist` 中的免安装 EXE。新增 PS 风格灰色界面、分层 PSD 读写、图层组、像素蒙版和剪贴蒙版；支持图层、绘画、中文文字、选区裁剪、渐变、图像调整、尺寸修改、合并和剪贴板图片，以及项目保存和图片导入导出；原版 macOS 源码保留不变。
+> **中文 Windows 11 版 0.5.0（本地移植）**：见 [使用说明](windows/README.zh-CN.md)。双击仓库根目录的 `启动中文版.cmd`，或运行 `windows/dist` 中约 0.55 MB 的轻量安装包。新增 PS 风格灰色界面、分层 PSD 与可编辑水平文字、图层组、蒙版、实际缩放旋转手柄、10 类 FX 样式及智能对齐吸附；支持图层、绘画、中文文字、选区裁剪、渐变、图像调整、尺寸修改、合并和剪贴板图片，以及项目保存和图片导入导出；原版 macOS 源码保留不变。
 
 Adobe Photoshop costs too much and tools like GIMP don’t feel familiar enough for me to stay in flow. That’s why I built Compositor.
 

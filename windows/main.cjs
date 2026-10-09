@@ -4,7 +4,17 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { readProject, saveProject, atomicWrite, MAX_BYTES } = require('./project.cjs');
 const { setImageResolution } = require('./image-metadata.cjs');
-const { readPsdDocument, writePsdDocument } = require('./psd.cjs');
+const { Worker } = require('node:worker_threads');
+let psdWorker, psdSerial = 0; const pendingPsd = new Map();
+function processPsd(action,payload) {
+  if (!psdWorker) {
+    psdWorker = new Worker(path.join(__dirname,'psd-worker.cjs'));
+    psdWorker.on('message',message => { const request = pendingPsd.get(message.id); if (!request) return; pendingPsd.delete(message.id); message.error ? request.reject(new Error(message.error)) : request.resolve(message.value); });
+    const fail = error => { for (const request of pendingPsd.values()) request.reject(error); pendingPsd.clear(); psdWorker = null; };
+    psdWorker.on('error',fail); psdWorker.on('exit',code => { if (code !== 0) fail(new Error('PSD 处理进程已结束，请重试。')); });
+  }
+  return new Promise((resolve,reject) => { const id = ++psdSerial; pendingPsd.set(id,{resolve,reject}); psdWorker.postMessage({id,action,payload}); });
+}
 let win, dirty = false, currentPath = null, pendingPath = null;
 const index = pathToFileURL(path.join(__dirname, 'src/index.html')).href;
 app.commandLine.appendSwitch('lang', 'zh-CN');
@@ -37,6 +47,7 @@ app.whenReady().then(() => {
     { label: '编辑(&E)', submenu: [item('撤销', 'Ctrl+Z', 'undo'), item('重做', 'Ctrl+Shift+Z', 'redo'), { type: 'separator' }, { label: '剪切文字', role: 'cut' }, { label: '复制文字', role: 'copy' }, { label: '粘贴文字', role: 'paste' }, { type: 'separator' }, item('复制可见画面（选区或全画布）', 'Ctrl+Shift+C', 'copyMerged'), item('粘贴图片为图层', 'Ctrl+Shift+V', 'pasteImage'), item('使用前景色填充', 'Shift+F5', 'fillSelection'), item('清除像素（选区或整个图层）', undefined, 'clearSelection')] },
     { label: '图像(&I)', submenu: [item('图像大小…', undefined, 'imageSize'), item('画布大小…', undefined, 'canvasSize'), item('裁剪到选区', undefined, 'cropSelection'), { type: 'separator' }, item('图像调整…', undefined, 'adjust')] },
     { label: '图层(&L)', submenu: [item('新建图层', 'Ctrl+Shift+N', 'addLayer'), item('复制图层', 'Ctrl+J', 'duplicate'), item('删除图层', undefined, 'deleteLayer'), item('向上移动', undefined, 'raise'), item('向下移动', undefined, 'lower'), item('创建图层组', 'Ctrl+G', 'group'), item('取消分组', 'Ctrl+Shift+G', 'ungroup'), item('创建 / 释放剪贴蒙版', 'Ctrl+Alt+G', 'clipping'), { type: 'separator' }, item('栅格化文字', undefined, 'rasterize'), item('向下合并', 'Ctrl+E', 'mergeDown'), item('合并可见图层', 'Ctrl+Shift+M', 'mergeVisible')] },
+    { label: '图层样式', submenu: [item('自由变换','Ctrl+T','freeTransform'),item('图层样式…',undefined,'layerStyles'),item('清除图层样式',undefined,'clearStyles')] },
     { label: '选择(&S)', submenu: [item('全选', 'Ctrl+A', 'selectAll'), item('取消选区', 'Ctrl+D', 'deselect')] },
     { label: '视图(&V)', submenu: [item('适合窗口', 'Ctrl+0', 'fit'), item('实际像素', 'Ctrl+1', 'actual'), { label: '全屏', role: 'togglefullscreen' }] },
     { label: '帮助(&H)', submenu: [item('使用说明与快捷键', undefined, 'help'), { label: '关于 Compositor 中文版', click: () => dialog.showMessageBox(win, { type: 'info', title: '关于', message: 'Compositor 中文版 ' + app.getVersion(), detail: '基于 robbietilton/Compositor 的独立 Windows 核心功能移植。\n原项目及本移植使用 MIT 许可证。\n支持分层 PSD、图层组、像素蒙版、剪贴蒙版、绘画、中文文字、选区裁剪、渐变、调整与图片导入导出。' }) }] }
@@ -55,7 +66,7 @@ app.whenReady().then(() => {
     const file = result.filePaths[0];
     if (path.extname(file).toLowerCase() === '.psd') {
       if ((await fs.stat(file)).size > MAX_BYTES) throw new Error('PSD 文件超过 128 MB。');
-      const imported = readPsdDocument(await fs.readFile(file)); pendingPath = null;
+      const imported = await processPsd('read',await fs.readFile(file)); pendingPath = null;
       return { ...imported, path: file, name: path.basename(file, path.extname(file)) };
     }
     const project = await readProject(result.filePaths[0]);
@@ -63,10 +74,9 @@ app.whenReady().then(() => {
     return { project, path: result.filePaths[0], name: path.basename(result.filePaths[0], '.ccomp') };
   });
   handle('psd:export', async payload => {
-    const bytes = writePsdDocument(payload.project, payload.composite);
     const result = await dialog.showSaveDialog(win, { title: '导出分层 PSD', defaultPath: '作品.psd', filters: [{ name: 'Photoshop PSD', extensions: ['psd'] }] });
     if (result.canceled) return null;
-    await atomicWrite(result.filePath, bytes); return result.filePath;
+    const bytes = await processPsd('write',payload); await atomicWrite(result.filePath, bytes); return result.filePath;
   });
   handle('project:save', async (project, saveAs) => {
     let file = currentPath;
@@ -126,6 +136,8 @@ app.whenReady().then(() => {
   // The renderer commits a path only after all project images decode successfully.
   ipcMain.on('document:commit', (event, kind) => { trusted(event); currentPath = kind === 'open' ? pendingPath : null; pendingPath = null; });
   ipcMain.on('document:close', event => { trusted(event); if (!dirty) win.close(); });
+  ipcMain.on('renderer:ready',event => { trusted(event); win.webContents.send('startup:complete'); });
   win.loadURL(index);
 });
 app.on('window-all-closed', () => app.quit());
+app.on('before-quit',() => psdWorker?.terminate());

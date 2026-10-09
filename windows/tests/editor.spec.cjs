@@ -172,7 +172,7 @@ test('纸张预设、单位和方向转换、保存预设、真实创建及分�
   await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, file);
   await menu('save'); await expect(page.locator('#document-name')).toHaveText('打印项目');
   const saved = JSON.parse(await fs.readFile(file, 'utf8'));
-  expect(saved.version).toBe(3); expect(saved.resolution).toBe(300); expect(saved.colorSpace).toBe('sRGB');
+  expect(saved.version).toBe(4); expect(saved.resolution).toBe(300); expect(saved.colorSpace).toBe('sRGB');
   for (const format of ['png', 'jpeg']) {
     const output = test.info().outputPath('300ppi.' + format);
     await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, output);

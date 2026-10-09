@@ -1,4 +1,6 @@
-# Windows project format v1–v3
+# Windows project format v1–v4
+
+Windows 0.5.0 saves v4 and reads v1–v3. See [v4 additions](../docs/windows-format-v4.md). The native WebView2 and Electron builds use the same renderer, schema validation, and PSD conversion code.
 
 The Windows port uses a separate UTF-8 JSON format, with extension `.ccomp`, to avoid claiming compatibility with the upstream macOS `.comp` package. The macOS manifest schema and `ProjectManifest.current` are unchanged.
 
