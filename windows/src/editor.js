@@ -1,4 +1,6 @@
+import { affine, inverse, multiply, vector, decompose } from './affine.mjs';
 import { childrenOf, ancestors, isVisible } from './layer-tree.js';
+import { fillSurface, applyAdjustment } from './fill-renderer.js';
 import { applyEffects } from './effects.js';
 import { hasEffects } from './effect-model.mjs';
 export const MAX_PIXELS = 64 * 1024 * 1024;
@@ -24,16 +26,15 @@ export function textLayer(text, x, y, color) {
 export function groupLayer(name) { return { ...baseLayer(name, 'group'), blend: 'pass-through', collapsed: false, parentId: null }; }
 export function invalidatePixels(target) { delete target.data; delete target._surface; delete target._bounds; }
 export function transformPoint(layer, p) {
-  const rad = layer.rotation * Math.PI / 180;
-  return { x: layer.x + layer.scale * (p.x * Math.cos(rad) - p.y * Math.sin(rad)), y: layer.y + layer.scale * (p.x * Math.sin(rad) + p.y * Math.cos(rad)) };
+  const v = vector(affine(layer),p); return {x:layer.x+v.x,y:layer.y+v.y};
 }
 export function updateLinkedMask(layer, previous) {
   if (!layer.mask?.linked) return;
   const mask = layer.mask, pos = transformPoint(layer, localPoint(previous, mask));
-  mask.x = pos.x; mask.y = pos.y; mask.scale *= layer.scale / previous.scale; mask.rotation += layer.rotation - previous.rotation; delete mask._surface;
+  mask.x = pos.x; mask.y = pos.y; Object.assign(mask,decompose(multiply(multiply(affine(layer),inverse(affine(previous))),affine(mask)))); delete mask._surface;
 }
 export function textFont(layer) {
-  return (layer.bold ? 'bold ' : '') + layer.fontSize + 'px "' + layer.font.replace(/["\\]/g, '') + '", "Microsoft YaHei", sans-serif';
+  return (layer.italic ? 'italic ' : '') + (layer.bold ? '700 ' : (layer.fontWeight || 400) + ' ') + layer.fontSize + 'px "' + layer.font.replace(/["\\]/g, '') + '", "Microsoft YaHei", sans-serif';
 }
 export function textLines(layer) {
   const ctx = canvas(1, 1).getContext('2d'); ctx.font = textFont(layer); ctx.letterSpacing = (layer.letterSpacing || 0) + 'px';
@@ -47,6 +48,8 @@ export function textLines(layer) {
   return lines;
 }
 export function bounds(layer) {
+  if(layer.type==='fill')return {width:layer.width,height:layer.height};
+  if(layer.type==='adjustment')return {width:1,height:1};
   if (layer.type === 'group') return { width: 1, height: 1 };
   if (layer.canvas) return { width: layer.canvas.width, height: layer.canvas.height };
   const ctx = canvas(1, 1).getContext('2d');
@@ -64,14 +67,10 @@ export function visualBounds(layer) {
   layer._bounds = right<left ? {x:0,y:0,width:w,height:h,empty:true} : {x:left,y:top,width:right-left+1,height:bottom-top+1}; return layer._bounds;
 }
 export function layerTransform(ctx, layer) {
-  ctx.translate(layer.x, layer.y);
-  ctx.rotate(layer.rotation * Math.PI / 180);
-  ctx.scale(layer.scale, layer.scale);
+  ctx.transform(...affine(layer),layer.x,layer.y);
 }
 export function localPoint(layer, point) {
-  const rad = -layer.rotation * Math.PI / 180;
-  const x = point.x - layer.x, y = point.y - layer.y;
-  return { x: (x * Math.cos(rad) - y * Math.sin(rad)) / layer.scale, y: (x * Math.sin(rad) + y * Math.cos(rad)) / layer.scale };
+  return vector(inverse(affine(layer)),{x:point.x-layer.x,y:point.y-layer.y});
 }
 export function drawLayer(ctx, layer) {
   if (!layer.visible || layer.opacity === 0) return;
@@ -79,19 +78,21 @@ export function drawLayer(ctx, layer) {
   ctx.globalAlpha = layer.opacity;
   ctx.globalCompositeOperation = layer.blend;
   layerTransform(ctx, layer);
-  if (layer.type === 'raster' || layer.textRasterCache && layer.canvas) ctx.drawImage(layer.canvas, 0, 0);
+  if(layer.type==='adjustment'){ctx.restore();return;}
+  if(layer.type==='fill')ctx.drawImage(fillSurface(layer),0,0);
+  else if (layer.type === 'raster' || layer.textRasterCache && layer.canvas) ctx.drawImage(layer.canvas, 0, 0);
   else {
     ctx.font = textFont(layer); ctx.textBaseline = 'top'; ctx.fillStyle = layer.color;
     ctx.letterSpacing = (layer.letterSpacing || 0) + 'px';
     const size = bounds(layer); ctx.textAlign = layer.align || 'left';
     if (layer.textMode === 'paragraph') { ctx.beginPath(); ctx.rect(0, 0, size.width, size.height); ctx.clip(); }
     const x = ctx.textAlign === 'center' ? size.width / 2 : ctx.textAlign === 'right' ? size.width : 0;
-    textLines(layer).forEach((line, i) => ctx.fillText(line, x, i * layer.fontSize * (layer.lineHeight || 1.35)));
+    textLines(layer).forEach((line, i) => { const y=i*layer.fontSize*(layer.lineHeight||1.35); ctx.fillText(line,x,y); if(layer.underline){const w=ctx.measureText(line).width,left=x-(ctx.textAlign==='center'?w/2:ctx.textAlign==='right'?w:0);ctx.fillRect(left,y+layer.fontSize, w, Math.max(1,layer.fontSize/18));} });
   }
   ctx.restore();
 }
 export function maskSurface(project, mask) {
-  const key = [project.width, project.height, mask.x, mask.y, mask.scale, mask.rotation, mask.defaultColor, mask.density, mask.feather].join(',');
+  const key = [project.width, project.height, mask.x, mask.y, mask.scale, mask.scaleY, mask.skew, mask.rotation, mask.defaultColor, mask.density, mask.feather].join(',');
   if (mask._surface?.key === key) return mask._surface.canvas;
   let pixels = canvas(project.width, project.height), ctx = pixels.getContext('2d');
   const gray = Math.round(mask.defaultColor ?? 255);
@@ -115,7 +116,7 @@ export function layerSurface(project, layer, includeMask = true) {
   else drawLayer(ctx, { ...layer, opacity: 1, blend: 'source-over', visible: true });
   if (includeMask && layer.mask?.enabled) { ctx.globalCompositeOperation = 'destination-in'; ctx.drawImage(maskSurface(project, layer.mask), 0, 0); }
   let region;
-  if (layer.type !== 'group' && (hasEffects(layer) || (layer.fillOpacity ?? 1) !== 1)) { const b=visualBounds(layer), points=[[b.x,b.y],[b.x+b.width,b.y],[b.x,b.y+b.height],[b.x+b.width,b.y+b.height]].map(([x,y])=>transformPoint(layer,{x,y})); const margin=layer.type==='text'&&!layer.textRasterCache ? layer.fontSize*layer.scale : 2; region={x:Math.min(...points.map(p=>p.x))-margin,y:Math.min(...points.map(p=>p.y))-margin,right:Math.max(...points.map(p=>p.x))+margin,bottom:Math.max(...points.map(p=>p.y))+margin}; }
+  if (layer.type !== 'group' && (hasEffects(layer) || (layer.fillOpacity ?? 1) !== 1)) { const b=visualBounds(layer), points=[[b.x,b.y],[b.x+b.width,b.y],[b.x,b.y+b.height],[b.x+b.width,b.y+b.height]].map(([x,y])=>transformPoint(layer,{x,y})); const margin=layer.type==='text'&&!layer.textRasterCache ? layer.fontSize*Math.max(layer.scale,layer.scaleY??layer.scale) : 2; region={x:Math.min(...points.map(p=>p.x))-margin,y:Math.min(...points.map(p=>p.y))-margin,right:Math.max(...points.map(p=>p.x))+margin,bottom:Math.max(...points.map(p=>p.y))+margin}; }
   return applyEffects(result, layer,region);
 }
 function blendColor(b, s, mode) {
@@ -142,6 +143,7 @@ function renderSiblings(ctx, project, parentId = null) {
   const layers = childrenOf(project, parentId);
   for (let i = 0; i < layers.length; i++) {
     const l = layers[i]; if (l.clipping) continue;
+    if(l.type==='adjustment'){if(l.visible&&l.opacity)applyAdjustment(ctx,project,l);continue;}
     const clipped = []; while (layers[i + 1]?.clipping) clipped.push(layers[++i]);
     if (!l.visible || l.opacity === 0) continue;
     if (!clipped.length && l.type === 'group' && l.blend === 'pass-through' && l.opacity === 1 && !l.mask?.enabled && !hasEffects(l) && (l.fillOpacity ?? 1) === 1) { renderSiblings(ctx, project, l.id); continue; }
@@ -158,7 +160,7 @@ function renderSiblings(ctx, project, parentId = null) {
     }
     if (!clipped.length && l.type !== 'group' && !l.mask?.enabled && !hasEffects(l) && (l.fillOpacity ?? 1) === 1) { drawLayer(ctx, l); continue; }
     const pixels = layerSurface(project, l);
-    for (const upper of clipped) if (upper.visible && upper.opacity) clipBlend(pixels, layerSurface(project, upper), upper.opacity, upper.blend);
+    for (const upper of clipped) if (upper.visible && upper.opacity) {if(upper.type==='adjustment')applyAdjustment(pixels.getContext('2d'),project,upper);else clipBlend(pixels, layerSurface(project, upper), upper.opacity, upper.blend);}
     ctx.save(); ctx.globalAlpha = l.opacity; ctx.globalCompositeOperation = l.blend === 'pass-through' ? 'source-over' : l.blend; ctx.drawImage(pixels, 0, 0); ctx.restore();
   }
 }
@@ -192,10 +194,10 @@ export function hitLayer(project, point) {
 }
 export function serialize(project) {
   return {
-    format: 'com.compositor.windows', version: 4, width: project.width, height: project.height, resolution: project.resolution ?? 72, colorSpace: 'sRGB', activeId: project.activeId,
+    format: 'com.compositor.windows', version: 5, guides:(project.guides || []).map(g=>({...g})), ruler:structuredClone(project.ruler || {unit:'px',origin:{x:0,y:0},visible:true,guidesVisible:true,locked:false}), width: project.width, height: project.height, resolution: project.resolution ?? 72, colorSpace: 'sRGB', activeId: project.activeId,
     layers: project.layers.map(layer => {
-      const { canvas: pixels, mask, _bounds, ...metadata } = layer;
-      const output = pixels ? { ...metadata, data: layer.data || pixels.toDataURL('image/png') } : metadata;
+      const { canvas: pixels, mask, _bounds, _fill, _pattern, ...metadata } = layer;
+      const output = pixels ? { ...structuredClone(metadata), data: layer.data || pixels.toDataURL('image/png') } : structuredClone(metadata);
       if (mask) { const { canvas: bitmap, _surface, _bounds, ...settings } = mask; output.mask = { ...settings, data: mask.data || bitmap.toDataURL('image/png') }; }
       return output;
     })
@@ -219,13 +221,14 @@ export async function deserialize(data) {
       pixels.getContext('2d').drawImage(image, 0, 0);
       layers.push({ ...layer, canvas: pixels });
     }
+    if(layer.fill?.data)layers.at(-1)._pattern=await decodeImage(layer.fill.data);
     if (layer.mask) {
       const image = await decodeImage(layer.mask.data), pixels = canvas(image.naturalWidth, image.naturalHeight);
       pixels.getContext('2d').drawImage(image, 0, 0);
       layers.at(-1).mask = { ...layer.mask, canvas: pixels };
     }
   }
-  return { width: data.width, height: data.height, resolution: data.resolution ?? 72, colorSpace: 'sRGB', activeId: data.activeId, layers };
+  return { width: data.width, height: data.height, resolution: data.resolution ?? 72, colorSpace: 'sRGB', activeId: data.activeId, guides:data.guides || [], ruler:data.ruler || {unit:'px',origin:{x:0,y:0},visible:true,guidesVisible:true,locked:false}, layers };
 }
 export class History {
   constructor() { this.reset(); }

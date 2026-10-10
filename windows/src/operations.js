@@ -20,7 +20,8 @@ export function checkSize(width, height) {
 function checkLayers(layers) {
   let pixels = 0;
   for (const l of layers) {
-    if (Math.abs(l.x) > 100000 || Math.abs(l.y) > 100000 || l.scale < .01 || l.scale > 100) throw new Error('缩放后图层的位置或比例超出限制，请先合并或栅格化该图层。');
+    if (Math.abs(l.x) > 100000 || Math.abs(l.y) > 100000 || l.scale < .01 || l.scale > 100 || (l.scaleY??l.scale)<.01 || (l.scaleY??l.scale)>100) throw new Error('缩放后图层的位置或比例超出限制，请先合并或栅格化该图层。');
+    if(l.type==='fill'){checkSize(l.width,l.height);pixels+=l.width*l.height;}
     if (l.canvas) { checkSize(l.canvas.width, l.canvas.height); pixels += l.canvas.width * l.canvas.height; }
     if (l.mask) {
       const m = l.mask;
@@ -42,14 +43,14 @@ export function resizeCanvasProject(project, width, height, anchor) {
   const x = Math.round((width - project.width) * anchor.x), y = Math.round((height - project.height) * anchor.y);
   const layers = project.layers.map(l => offsetLayer(l, x, y));
   checkLayers(layers);
-  return { ...project, width, height, layers };
+  return { ...project, width, height, layers, guides:(project.guides||[]).map(g=>({...g,position:g.position+(g.axis==='x'?x:y)})),ruler:project.ruler?{...project.ruler,origin:{x:project.ruler.origin.x+x,y:project.ruler.origin.y+y}}:undefined };
 }
 
 export function cropProject(project, rect) {
   checkSize(rect.width, rect.height);
   const layers = project.layers.map(l => offsetLayer(l, -rect.x, -rect.y));
   checkLayers(layers);
-  return { ...project, width: rect.width, height: rect.height, layers };
+  return { ...project, width: rect.width, height: rect.height, layers,guides:(project.guides||[]).map(g=>({...g,position:g.position-(g.axis==='x'?rect.x:rect.y)})),ruler:project.ruler?{...project.ruler,origin:{x:project.ruler.origin.x-rect.x,y:project.ruler.origin.y-rect.y}}:undefined };
 }
 
 export function resizeImageProject(project, width, height, resolution) {
@@ -59,13 +60,14 @@ export function resizeImageProject(project, width, height, resolution) {
   const plans = project.layers.map(l => ({ layer: l, width: l.canvas ? l.type === 'text' ? l.canvas.width : Math.max(1, Math.round(l.canvas.width * factor)) : 0, height: l.canvas ? l.type === 'text' ? l.canvas.height : Math.max(1, Math.round(l.canvas.height * factor)) : 0 }));
   let pixels = 0;
   for (const p of plans) if (p.width) { checkSize(p.width, p.height); pixels += p.width * p.height; }
+  for(const l of project.layers)if(l.type==='fill')pixels+=Math.max(1,Math.round(l.width*factor))*Math.max(1,Math.round(l.height*factor));
   if (pixels > MAX_PIXELS) throw new Error('缩放后像素图层合计超过 6400 万像素，请先合并或删除部分图层。');
   for (const l of project.layers) if (l.mask) {
     const w = Math.max(1, Math.round(l.mask.canvas.width * factor)), h = Math.max(1, Math.round(l.mask.canvas.height * factor)); checkSize(w, h); pixels += w * h;
   }
   if (pixels > MAX_PIXELS) throw new Error('缩放后图层与蒙版合计超过 6400 万像素。');
   const layers = plans.map(p => {
-    const l = p.layer, result = { ...l, x: l.x * factor, y: l.y * factor, scale: l.type === 'text' ? l.scale * factor : l.scale };
+    const l = p.layer, result = { ...l, x: l.x * factor, y: l.y * factor, scale: l.type === 'text' ? l.scale * factor : l.scale, ...(l.scaleY !== undefined ? {scaleY:l.type==='text'?l.scaleY*factor:l.scaleY} : {}) };
     if (l.mask) {
       const m = l.mask, w = Math.max(1, Math.round(m.canvas.width * factor)), h = Math.max(1, Math.round(m.canvas.height * factor));
       const pixels = canvas(w, h), ctx = pixels.getContext('2d'); ctx.imageSmoothingQuality = 'high'; ctx.drawImage(m.canvas, 0, 0, w, h);
@@ -80,10 +82,12 @@ export function resizeImageProject(project, width, height, resolution) {
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(p.layer.canvas, 0, 0, p.width, p.height);
     layers[i].canvas = pixels; delete layers[i].data; delete layers[i]._bounds;
   });
-  return { ...project, width, height, resolution, layers };
+  for(const layer of layers)if(layer.type==='fill'){layer.width=Math.max(1,Math.round(layer.width*factor));layer.height=Math.max(1,Math.round(layer.height*factor));delete layer._fill;}
+  return { ...project, width, height, resolution, layers,guides:(project.guides||[]).map(g=>({...g,position:g.position*factor})),ruler:project.ruler?{...project.ruler,origin:{x:project.ruler.origin.x*factor,y:project.ruler.origin.y*factor}}:undefined };
 }
 
 export function rasterize(layer) {
+  if(layer.type==='fill'){const pixels=canvas(layer.width,layer.height);drawLayer(pixels.getContext('2d'),{...layer,x:0,y:0,scale:1,scaleY:1,skew:0,rotation:0,opacity:1,blend:'source-over',visible:true});const {fill,width,height,_fill,_pattern,...metadata}=layer;return{...metadata,type:'raster',canvas:pixels};}
   const size = bounds(layer), measure = canvas(1, 1).getContext('2d');
   measure.font = textFont(layer); measure.textBaseline = 'top';
   let left = 0, top = 0, right = size.width, bottom = size.height;
@@ -96,10 +100,10 @@ export function rasterize(layer) {
   const width = Math.ceil(right) - left + 1, height = Math.ceil(bottom) - top + 1;
   checkSize(width, height);
   const pixels = canvas(width, height), ctx = pixels.getContext('2d'); ctx.translate(-left, -top);
-  drawLayer(ctx, { ...layer, x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, blend: 'source-over', visible: true });
+  drawLayer(ctx, { ...layer, x: 0, y: 0, scale: 1, scaleY:1,skew:0, rotation: 0, opacity: 1, blend: 'source-over', visible: true });
   const { text, font, fontSize, color, bold, data, textMode, boxWidth, boxHeight, align, lineHeight, letterSpacing, textRasterCache, psdTextSource, textCacheOrigin, ...metadata } = layer;
   const rad = layer.rotation * Math.PI / 180;
-  return { ...metadata, x: layer.x + layer.scale * (left * Math.cos(rad) - top * Math.sin(rad)), y: layer.y + layer.scale * (left * Math.sin(rad) + top * Math.cos(rad)), type: 'raster', canvas: pixels };
+  return { ...metadata, ...transformPoint(layer,{x:left,y:top}), type: 'raster', canvas: pixels };
 }
 
 export function adjustRaster(layer, original, selection, settings) {

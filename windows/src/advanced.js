@@ -3,11 +3,11 @@ import { canvas, groupLayer, layerSurface, invalidatePixels, updateLinkedMask, t
 import { checkSize } from './operations.js';
 import { childrenOf, descendants, ancestors, canonicalize, moveSibling, isLocked } from './layer-tree.js';
 
-export const pixelCount = layer => [layer, layer.mask].reduce((n, t) => n + (t?.canvas ? t.canvas.width * t.canvas.height : 0), 0);
+export const pixelCount = layer => (layer.type==='fill'?layer.width*layer.height:0)+ [layer, layer.mask].reduce((n, t) => n + (t?.canvas ? t.canvas.width * t.canvas.height : 0), 0);
 export function expandMask(project, layer, capacity) {
   const m = layer.mask;
   if (!m) return;
-  if (m.rotation === 0 && m.scale === 1 && m.x <= 0 && m.y <= 0 && m.x + m.canvas.width >= project.width && m.y + m.canvas.height >= project.height) return;
+  if (m.rotation === 0 && m.scale === 1 && (m.scaleY??1) === 1 && !m.skew && m.x <= 0 && m.y <= 0 && m.x + m.canvas.width >= project.width && m.y + m.canvas.height >= project.height) return;
   const points = [{ x: 0, y: 0 }, { x: m.canvas.width, y: 0 }, { x: 0, y: m.canvas.height }, { x: m.canvas.width, y: m.canvas.height }].map(p => transformPoint(m, p));
   const x = Math.floor(Math.min(0, ...points.map(p => p.x))), y = Math.floor(Math.min(0, ...points.map(p => p.y)));
   const width = Math.ceil(Math.max(project.width, ...points.map(p => p.x))) - x, height = Math.ceil(Math.max(project.height, ...points.map(p => p.y))) - y;
@@ -15,7 +15,7 @@ export function expandMask(project, layer, capacity) {
   const pixels = canvas(width, height), ctx = pixels.getContext('2d');
   const gray = m.defaultColor; ctx.fillStyle = `rgb(${gray},${gray},${gray})`; ctx.fillRect(0, 0, width, height);
   ctx.translate(-x, -y); layerTransform(ctx, m); ctx.drawImage(m.canvas, 0, 0);
-  Object.assign(m, { canvas: pixels, x, y, scale: 1, rotation: 0 }); invalidatePixels(m);
+  Object.assign(m, { canvas: pixels, x, y, scale: 1, scaleY:1, skew:0, rotation: 0 }); invalidatePixels(m);
 }
 export function grayColor(color) {
   const rgb = color.slice(1).match(/../g).map(n => parseInt(n, 16));
@@ -24,6 +24,7 @@ export function grayColor(color) {
 }
 export function transformLayer(layer, values) {
   const previous = { ...layer }, next = { ...layer, ...values };
+  if (values.scale !== undefined && values.scaleY === undefined && layer.scaleY !== undefined) next.scaleY = layer.scaleY * values.scale / layer.scale;
   if (layer.mask?.linked) {
     next.mask = { ...layer.mask }; updateLinkedMask(next, previous); const m = next.mask;
     if (Math.abs(m.x) > 100000 || Math.abs(m.y) > 100000 || m.scale < .01 || m.scale > 100 || Math.abs(m.rotation) > 36000) throw new Error('变换后蒙版超出限制，请先取消链接或栅格化。');
@@ -47,6 +48,7 @@ function cloneLayer(layer, idMap) {
     copy.mask = { ...layer.mask, canvas: canvas(layer.mask.canvas.width, layer.mask.canvas.height), _surface: undefined };
     copy.mask.canvas.getContext('2d').drawImage(layer.mask.canvas, 0, 0);
   }
+  if(layer.fill)copy.fill=structuredClone(layer.fill);if(layer.adjustment)copy.adjustment=structuredClone(layer.adjustment);delete copy._fill;
   if (layer.styles) copy.styles = structuredClone(layer.styles);
   return copy;
 }
@@ -63,10 +65,11 @@ export function advancedCommand(action, state) {
     const pixels = canvas(project.width, project.height), ctx = pixels.getContext('2d'), sel = state.selection;
     const hide = action === 'hideMask'; ctx.fillStyle = hide || sel ? '#000000' : '#ffffff'; ctx.fillRect(0, 0, pixels.width, pixels.height);
     if (sel) { ctx.fillStyle = hide ? '#000000' : '#ffffff'; ctx.fillRect(sel.x, sel.y, sel.width, sel.height); }
-    layer.mask = { canvas: pixels, x: 0, y: 0, scale: 1, rotation: 0, defaultColor: hide || sel ? 0 : 255, density: 1, feather: 0, enabled: true, linked: true };
+    layer.mask = { canvas: pixels, x: 0, y: 0, scale: 1, scaleY:1,skew:0, rotation: 0, defaultColor: hide || sel ? 0 : 255, density: 1, feather: 0, enabled: true, linked: true };
     setTarget('mask'); changed('已添加蒙版：黑色隐藏，白色显示。点击图像缩略图可返回图像编辑。');
   } else if (['toggleMask', 'linkMask', 'invertMask', 'deleteMask', 'applyMask'].includes(action)) {
     if (!layer.mask) throw new Error('请先为当前图层添加蒙版。');
+    if(action==='applyMask'&&layer.type==='adjustment')throw new Error('调整图层请先向下合并，再应用蒙版。');
     if (action === 'applyMask' && layer.type === 'group') throw new Error('组蒙版请通过合并可见图层应用。');
     if (action === 'applyMask') capacity(project.width * project.height - pixelCount(layer), 1, 0);
     checkpoint(); const m = layer.mask;
@@ -77,8 +80,8 @@ export function advancedCommand(action, state) {
       for (let i = 0; i < image.data.length; i += 4) { image.data[i] = image.data[i + 1] = image.data[i + 2] = 255 - image.data[i]; image.data[i + 3] = 255; }
       ctx.putImageData(image, 0, 0); m.defaultColor = 255 - m.defaultColor; invalidatePixels(m);
     } else if (action === 'applyMask') {
-      const next = { ...layer, type: 'raster', canvas: layerSurface(project, layer), x: 0, y: 0, scale: 1, rotation: 0 };
-      for (const key of ['mask', 'text', 'font', 'fontSize', 'bold', 'color', 'data', 'styles', 'psdEffects', 'textRasterCache', 'psdTextSource', 'textMode', 'fillOpacity']) delete next[key];
+      const next = { ...layer, type: 'raster', canvas: layerSurface(project, layer), x: 0, y: 0, scale: 1, scaleY:1,skew:0, rotation: 0 };
+      for (const key of ['fill','width','height','_fill','_pattern','mask', 'text', 'font', 'fontSize', 'bold', 'color', 'data', 'styles', 'psdEffects', 'textRasterCache', 'psdTextSource', 'textMode', 'fillOpacity']) delete next[key];
       project.layers[project.layers.indexOf(layer)] = next; setTarget('image');
     } else { delete layer.mask; setTarget('image'); }
     changed(action === 'applyMask' ? '蒙版已应用为像素，可撤销恢复' : '已更新图层蒙版');

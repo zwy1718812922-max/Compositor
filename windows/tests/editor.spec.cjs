@@ -172,7 +172,7 @@ test('纸张预设、单位和方向转换、保存预设、真实创建及分�
   await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, file);
   await menu('save'); await expect(page.locator('#document-name')).toHaveText('打印项目');
   const saved = JSON.parse(await fs.readFile(file, 'utf8'));
-  expect(saved.version).toBe(4); expect(saved.resolution).toBe(300); expect(saved.colorSpace).toBe('sRGB');
+  expect(saved.version).toBe(5); expect(saved.resolution).toBe(300); expect(saved.colorSpace).toBe('sRGB');
   for (const format of ['png', 'jpeg']) {
     const output = test.info().outputPath('300ppi.' + format);
     await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, output);
@@ -229,6 +229,8 @@ test('参考图布局、纸张选择和最小窗口的创建按钮可见', async
   await dialog.screenshot({ path: path.join(__dirname, '../new-canvas-preview.png') });
   await page.locator('.new-details').screenshot({ path: path.join(__dirname, '../new-canvas-details.png') });
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1024, 720));
+  await page.waitForFunction(()=>innerWidth===1024);
+  await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
   const small = await dialog.boundingBox();
   const size = await page.evaluate(() => [innerWidth, innerHeight]);
   expect(small.x).toBeGreaterThanOrEqual(0); expect(small.y).toBeGreaterThanOrEqual(0);

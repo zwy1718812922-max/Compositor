@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('desktop', {
   openProject: () => ipcRenderer.invoke('project:open'),
   saveProject: (project, saveAs) => ipcRenderer.invoke('project:save', project, saveAs),
+  aiRun:payload=>ipcRenderer.invoke('ai:run',payload),aiCancel:()=>ipcRenderer.invoke('ai:cancel'),onAiProgress:fn=>ipcRenderer.on('ai:progress',(_e,p)=>fn(p)),
+  fonts:()=>ipcRenderer.invoke('fonts:list'),
   importImages: () => ipcRenderer.invoke('image:import'),
   exportImage: (data, format, resolution) => ipcRenderer.invoke('image:export', data, format, resolution),
   exportPsd: payload => ipcRenderer.invoke('psd:export', payload),

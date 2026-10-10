@@ -43,13 +43,13 @@ app.whenReady().then(() => {
   });
   const item = (label, accelerator, command) => ({ label, accelerator, click: () => send(command) });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: '文件(&F)', submenu: [item('新建画布', 'Ctrl+N', 'new'), item('打开项目或 PSD…', 'Ctrl+O', 'open'), item('导入图片…', 'Ctrl+I', 'import'), { type: 'separator' }, item('保存项目', 'Ctrl+S', 'save'), item('项目另存为…', 'Ctrl+Shift+S', 'saveAs'), item('导出图片…', 'Ctrl+Shift+E', 'export'), { type: 'separator' }, { label: '退出', click: () => win.close() }] },
+    { label: '文件(&F)', submenu: [item('关闭当前项目','Ctrl+W','closeDocument'), item('新建画布', 'Ctrl+N', 'new'), item('打开项目或 PSD…', 'Ctrl+O', 'open'), item('导入图片…', 'Ctrl+I', 'import'), { type: 'separator' }, item('保存项目', 'Ctrl+S', 'save'), item('项目另存为…', 'Ctrl+Shift+S', 'saveAs'), item('导出图片…', 'Ctrl+Shift+E', 'export'), { type: 'separator' }, { label: '退出', click: () => win.close() }] },
     { label: '编辑(&E)', submenu: [item('撤销', 'Ctrl+Z', 'undo'), item('重做', 'Ctrl+Shift+Z', 'redo'), { type: 'separator' }, { label: '剪切文字', role: 'cut' }, { label: '复制文字', role: 'copy' }, { label: '粘贴文字', role: 'paste' }, { type: 'separator' }, item('复制可见画面（选区或全画布）', 'Ctrl+Shift+C', 'copyMerged'), item('粘贴图片为图层', 'Ctrl+Shift+V', 'pasteImage'), item('使用前景色填充', 'Shift+F5', 'fillSelection'), item('清除像素（选区或整个图层）', undefined, 'clearSelection')] },
     { label: '图像(&I)', submenu: [item('图像大小…', undefined, 'imageSize'), item('画布大小…', undefined, 'canvasSize'), item('裁剪到选区', undefined, 'cropSelection'), { type: 'separator' }, item('图像调整…', undefined, 'adjust')] },
     { label: '图层(&L)', submenu: [item('新建图层', 'Ctrl+Shift+N', 'addLayer'), item('复制图层', 'Ctrl+J', 'duplicate'), item('删除图层', undefined, 'deleteLayer'), item('向上移动', undefined, 'raise'), item('向下移动', undefined, 'lower'), item('创建图层组', 'Ctrl+G', 'group'), item('取消分组', 'Ctrl+Shift+G', 'ungroup'), item('创建 / 释放剪贴蒙版', 'Ctrl+Alt+G', 'clipping'), { type: 'separator' }, item('栅格化文字', undefined, 'rasterize'), item('向下合并', 'Ctrl+E', 'mergeDown'), item('合并可见图层', 'Ctrl+Shift+M', 'mergeVisible')] },
     { label: '图层样式', submenu: [item('自由变换','Ctrl+T','freeTransform'),item('图层样式…',undefined,'layerStyles'),item('清除图层样式',undefined,'clearStyles')] },
     { label: '选择(&S)', submenu: [item('全选', 'Ctrl+A', 'selectAll'), item('取消选区', 'Ctrl+D', 'deselect')] },
-    { label: '视图(&V)', submenu: [item('适合窗口', 'Ctrl+0', 'fit'), item('实际像素', 'Ctrl+1', 'actual'), { label: '全屏', role: 'togglefullscreen' }] },
+    { label: '视图(&V)', submenu: [item('标尺','Ctrl+R','toggleRulers'),item('参考线','Ctrl+;','toggleGuides'),item('适合窗口', 'Ctrl+0', 'fit'), item('实际像素', 'Ctrl+1', 'actual'), { label: '全屏', role: 'togglefullscreen' }] },
     { label: '帮助(&H)', submenu: [item('使用说明与快捷键', undefined, 'help'), { label: '关于 Compositor 中文版', click: () => dialog.showMessageBox(win, { type: 'info', title: '关于', message: 'Compositor 中文版 ' + app.getVersion(), detail: '基于 robbietilton/Compositor 的独立 Windows 核心功能移植。\n原项目及本移植使用 MIT 许可证。\n支持分层 PSD、图层组、像素蒙版、剪贴蒙版、绘画、中文文字、选区裁剪、渐变、调整与图片导入导出。' }) }] }
   ]));
   win.setMenuBarVisibility(false);
@@ -60,6 +60,9 @@ app.whenReady().then(() => {
     else throw new Error('未知窗口操作。');
   });
   ipcMain.on('document:dirty', (event, value) => { trusted(event); dirty = Boolean(value); });
+  const ai=require('./ai-service.cjs').createAiService(p=>{if(!win.isDestroyed())win.webContents.send('ai:progress',p);});
+  handle('ai:run',p=>ai.run(p));handle('ai:cancel',()=>ai.cancel());win.on('closed',()=>ai.cancel());
+  handle('fonts:list',()=>new Promise((resolve,reject)=>{require('node:child_process').execFile('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(__dirname.replace('app.asar','app.asar.unpacked'),'native','fonts.ps1')],{windowsHide:true,encoding:'utf8',maxBuffer:2*1024*1024},(error,out)=>error?reject(error):resolve(JSON.parse(out.replace(/^\uFEFF/,''))));}));
   handle('project:open', async () => {
     const result = await dialog.showOpenDialog(win, { title: '打开项目或 PSD', filters: [{ name: '项目与 Photoshop 文件', extensions: ['ccomp', 'psd'] }, { name: 'Photoshop PSD', extensions: ['psd'] }, { name: 'Compositor 项目', extensions: ['ccomp'] }], properties: ['openFile'] });
     if (result.canceled) return null;

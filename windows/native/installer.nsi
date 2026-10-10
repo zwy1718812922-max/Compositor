@@ -2,7 +2,7 @@
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 !ifndef VERSION
-  !define VERSION "0.5.0"
+  !define VERSION "0.6.0"
 !endif
 Name "Compositor 中文版"
 OutFile "..\dist\Compositor-ZH-${VERSION}-x64-Lite-Setup.exe"
@@ -61,6 +61,7 @@ Section "Uninstall"
   RMDir /r "$INSTDIR\src"
   RMDir /r "$INSTDIR\assets"
   RMDir /r "$INSTDIR\native"
+  RMDir /r "$INSTDIR\ai"
   Delete "$INSTDIR\卸载.exe"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\CompositorZH-Lite"

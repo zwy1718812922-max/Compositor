@@ -47,12 +47,12 @@ internal sealed class EditorWindow : Form {
     static bool Flag(object value) { return value is bool && (bool)value; }
     static double Number(object value) { return Convert.ToDouble(value); }
     public EditorWindow() {
-        Text="Compositor 中文版 0.5.0"; ClientSize=new Size(1440,960);MinimumSize=new Size(1024,720);StartPosition=FormStartPosition.CenterScreen;
+        Text="Compositor 中文版 0.6.0"; ClientSize=new Size(1440,960);MinimumSize=new Size(1024,720);StartPosition=FormStartPosition.CenterScreen;
         FormBorderStyle=FormBorderStyle.None;BackColor=Color.FromArgb(38,38,38);Padding=new Padding(1);AutoScaleMode=AutoScaleMode.Dpi;
         MaximizedBounds=Screen.FromControl(this).WorkingArea;var icon=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"assets","icon.ico");if(File.Exists(icon))Icon=new Icon(icon);
         web.Dock=DockStyle.Fill;web.DefaultBackgroundColor=BackColor;Controls.Add(web);Controls.Add(splash);splash.BringToFront();
         Load+=async delegate { await Initialize(); };
-        FormClosing+=delegate(object sender,FormClosingEventArgs e){if(dirty&&web.CoreWebView2!=null){e.Cancel=true;Command("close");}};
+        FormClosing+=delegate(object sender,FormClosingEventArgs e){if(!dirty&&ai!=null)ai.Cancel();if(dirty&&web.CoreWebView2!=null){e.Cancel=true;Command("close");}};
     }
     async Task Initialize() {
         try {
@@ -88,9 +88,13 @@ internal sealed class EditorWindow : Form {
         if(data.Length>MaxBytes)throw new Exception("文件超过 128 MB。");file=Path.GetFullPath(file);var temp=Path.Combine(Path.GetDirectoryName(file),"."+Path.GetFileName(file)+"."+Guid.NewGuid()+".tmp");
         try { File.WriteAllBytes(temp,data);if(File.Exists(file))File.Replace(temp,file,null);else File.Move(temp,file); }finally {if(File.Exists(temp))File.Delete(temp);}
     }
+    AiService ai;
     async Task<object> Dispatch(string method,object payload) {
         var p=Object(payload);
         switch(method) {
+            case "ai:cancel":return ai!=null&&ai.Cancel();
+            case "ai:run":if(ai==null)ai=new AiService(AppDomain.CurrentDomain.BaseDirectory,Environment.GetEnvironmentVariable("COMPOSITOR_AI_ROOT")??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"CompositorZH","AI"),data=>{if(!IsDisposed)BeginInvoke(new Action(()=>web.CoreWebView2.PostWebMessageAsJson(Json().Serialize(new {aiProgress=data}))));});return await ai.Run(p);
+            case "fonts:list":return await Task.Run(()=>FontCatalog.Read());
             case "renderer:ready":splash.Hide();splash.Dispose();return true;
             case "document:dirty":dirty=Flag(payload);return true;
             case "document:commit":currentPath=StringValue(payload)=="open"?pendingPath:null;pendingPath=null;return true;
@@ -103,7 +107,7 @@ internal sealed class EditorWindow : Form {
                 var project=Json().DeserializeObject(Encoding.UTF8.GetString(bytes));pendingPath=file;return new {project,path=file,name};
             }
             case "project:save": {
-                var project=Object(Get(p,"project"));if(Field(project,"format")!="com.compositor.windows"||Number(Get(project,"version"))<1||Number(Get(project,"version"))>4)throw new Exception("项目格式无效。");
+                var project=Object(Get(p,"project"));if(Field(project,"format")!="com.compositor.windows"||Number(Get(project,"version"))<1||Number(Get(project,"version"))>5)throw new Exception("项目格式无效。");
                 var file=currentPath;if(file==null||Flag(Get(p,"saveAs")))file=SavePath("Compositor 项目|*.ccomp",file??"未命名.ccomp");if(file==null)return null;
                 var bytes=Encoding.UTF8.GetBytes(Json().Serialize(project));await Task.Run(()=>AtomicWrite(file,bytes));currentPath=file;return new {path=file,name=Path.GetFileNameWithoutExtension(file)};
             }

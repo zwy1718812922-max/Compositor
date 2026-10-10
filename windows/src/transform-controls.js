@@ -1,6 +1,7 @@
 import { bounds, visualBounds, transformPoint } from './editor.js';
 import { descendants, isLocked, isVisible } from './layer-tree.js';
 import { transformLayer } from './advanced.js';
+import { affine, inverse, multiply, vector, decompose } from './affine.mjs';
 export function setupTransformControls(state) {
   const element = document.getElementById('transform-controls');
   const positions = { nw:[0,0],n:[.5,0],ne:[1,0],e:[1,.5],se:[1,1],s:[.5,1],sw:[0,1],w:[0,.5],rotate:[.5,0] };
@@ -15,16 +16,17 @@ export function setupTransformControls(state) {
   }
   function update() {
     const p = state.project(), l = state.active(), view = state.view();
-    element.hidden = !state.show() || !l || !isVisible(p,l); if (element.hidden) return;
+    element.hidden = !state.show() || !l || l.type==='adjustment' || !isVisible(p,l); if (element.hidden) return;
     const moving = items(); if (!moving.length) { element.hidden = true; return; }
-    if (moving.length === 1 && (l.type !== 'group' || state.target() === 'mask')) { const t = state.target() === 'mask' ? l.mask : l, size = visualBounds(t); if (size.empty) {element.hidden=true;return;} const pos = transformPoint(t,{x:size.x,y:size.y}); frame = {...pos,scale:t.scale,rotation:t.rotation,width:size.width,height:size.height}; }
+    if (moving.length === 1 && (l.type !== 'group' || state.target() === 'mask')) { const t = state.target() === 'mask' ? l.mask : l, size = visualBounds(t); if (size.empty) {element.hidden=true;return;} const pos = transformPoint(t,{x:size.x,y:size.y}); frame = {...t,...pos,width:size.width,height:size.height}; }
     else {
       const points = moving.filter(i => i.owner.type !== 'group' && isVisible(p,i.owner)).flatMap(({layer}) => { const b = visualBounds(layer); return b.empty ? [] : [[b.x,b.y],[b.x+b.width,b.y],[b.x+b.width,b.y+b.height],[b.x,b.y+b.height]].map(([x,y]) => transformPoint(layer,{x,y})); });
       if (!points.length) { element.hidden = true; return; }
       const x = Math.min(...points.map(p => p.x)), y = Math.min(...points.map(p => p.y)); frame = { x,y,scale:1,rotation:0,width:Math.max(1,Math.max(...points.map(p => p.x))-x),height:Math.max(1,Math.max(...points.map(p => p.y))-y) };
     }
     element.style.left = view.pan.x + frame.x * view.zoom + 'px'; element.style.top = view.pan.y + frame.y * view.zoom + 'px';
-    element.style.width = frame.width * frame.scale * view.zoom + 'px'; element.style.height = frame.height * frame.scale * view.zoom + 'px'; element.style.transform = `rotate(${frame.rotation}deg)`;
+    const m=affine(frame),sx=Math.hypot(m[0],m[1]),sy=Math.hypot(m[2],m[3]);
+    element.style.width = frame.width * sx * view.zoom + 'px'; element.style.height = frame.height * sy * view.zoom + 'px'; element.style.transform = `matrix(${[m[0]/sx,m[1]/sx,m[2]/sy,m[3]/sy].join(',')},0,0)`;
     const locked = moving.some(i => isLocked(p,i.owner)); element.querySelectorAll('button').forEach(b => b.disabled = locked);
   }
   function start(event, key) {
@@ -33,22 +35,27 @@ export function setupTransformControls(state) {
     const before = state.snapshot(), originals = moving.map(i => ({ ...i, original: { ...i.layer, mask:i.layer.mask ? {...i.layer.mask} : undefined } }));
     const [hx,hy] = positions[key], centered = event.altKey || key === 'rotate', pivot = transformPoint(frame,{ x:(centered ? .5 : 1-hx)*frame.width, y:(centered ? .5 : 1-hy)*frame.height });
     const handle = key === 'rotate' ? state.point(event) : transformPoint(frame,{x:hx*frame.width,y:hy*frame.height});
-    state.begin(event,{kind:'transform',key,pivot,handle,start:state.point(event),originals,before,dirty:state.dirty(),undo:[...state.history.undoStack],redo:[...state.history.redoStack],committed:false});
+    state.begin(event,{kind:'transform',key,pivot,handle,frame:{...frame},start:state.point(event),originals,before,dirty:state.dirty(),undo:[...state.history.undoStack],redo:[...state.history.redoStack],committed:false});
   }
   for (const [key,[x,y]] of Object.entries(positions)) {
-    const b = document.createElement('button'); b.type = 'button'; b.dataset.handle = key; b.style.left = x*100+'%'; b.style.top = y*100+'%'; b.setAttribute('aria-label',key === 'rotate' ? '旋转图层手柄' : names[key]+'等比缩放手柄'); b.title = key === 'rotate' ? '拖动旋转；Shift 按 15° 对齐' : '拖动等比缩放；Alt 围绕中心缩放';
+    const b = document.createElement('button'); b.type = 'button'; b.dataset.handle = key; b.style.left = x*100+'%'; b.style.top = y*100+'%'; b.setAttribute('aria-label',key === 'rotate' ? '旋转图层手柄' : names[key]+'缩放手柄'); b.title = key === 'rotate' ? '拖动旋转；Shift 按 15° 对齐' : '自由缩放；Shift 等比 · Alt 围绕中心';
     b.onpointerdown = event => start(event,key); element.append(b);
   }
   function move(g, point, shift) {
-    let factor = 1, angle = 0;
+    let fx = 1, fy = 1, angle = 0, matrix;
     if (g.key === 'rotate') { angle = (Math.atan2(point.y-g.pivot.y,point.x-g.pivot.x)-Math.atan2(g.handle.y-g.pivot.y,g.handle.x-g.pivot.x))*180/Math.PI; angle = (angle+540)%360-180; if (shift) angle = Math.round(angle/15)*15; }
-    else { const dx = g.handle.x-g.pivot.x, dy = g.handle.y-g.pivot.y; factor = Math.max(.0001, ((point.x-g.pivot.x)*dx+(point.y-g.pivot.y)*dy)/Math.max(.0001,dx*dx+dy*dy)); const sources = g.originals.flatMap(i => [i.original,...(i.original.mask?.linked ? [i.original.mask] : [])]); factor = Math.max(...sources.map(l => .01/l.scale),Math.min(factor,...sources.map(l => 100/l.scale))); }
-    if (!g.committed && Math.abs(factor-1)<.00001 && Math.abs(angle)<.001) return;
-    const rad = angle*Math.PI/180;
-    const plans = g.originals.map(i => { const o = i.original, dx=o.x-g.pivot.x,dy=o.y-g.pivot.y, next = {...o,mask:o.mask ? {...o.mask} : undefined}; transformLayer(next,{x:g.pivot.x+factor*(dx*Math.cos(rad)-dy*Math.sin(rad)),y:g.pivot.y+factor*(dx*Math.sin(rad)+dy*Math.cos(rad)),scale:o.scale*factor,rotation:o.rotation+angle}); if (Math.abs(next.x)>100000 || Math.abs(next.y)>100000 || Math.abs(next.rotation)>36000) throw new Error('变换超出允许范围。'); return { layer:i.layer,next }; });
+    else {
+      const basis=affine(g.frame), inv=inverse(basis), from=vector(inv,{x:g.handle.x-g.pivot.x,y:g.handle.y-g.pivot.y}), to=vector(inv,{x:point.x-g.pivot.x,y:point.y-g.pivot.y});
+      if (shift) fx=fy=Math.max(.001,(to.x*from.x+to.y*from.y)/Math.max(.0001,from.x*from.x+from.y*from.y));
+      else { if (!['n','s'].includes(g.key)) fx=Math.max(.001,to.x/from.x); if (!['e','w'].includes(g.key)) fy=Math.max(.001,to.y/from.y); }
+      matrix=multiply(multiply(basis,[fx,0,0,fy]),inv);
+    }
+    if (!g.committed && Math.abs(fx-1)<.00001 && Math.abs(fy-1)<.00001 && Math.abs(angle)<.001) return;
+    if (g.key==='rotate') { const r=angle*Math.PI/180;matrix=[Math.cos(r),Math.sin(r),-Math.sin(r),Math.cos(r)]; }
+    const plans = g.originals.map(i => { const o = i.original, v=vector(matrix,{x:o.x-g.pivot.x,y:o.y-g.pivot.y}), next = {...o,mask:o.mask ? {...o.mask} : undefined}; transformLayer(next,{x:g.pivot.x+v.x,y:g.pivot.y+v.y,...decompose(multiply(matrix,affine(o)))}); if (Math.abs(next.x)>100000 || Math.abs(next.y)>100000) throw new Error('变换超出允许范围。'); return {layer:i.layer,next}; });
     if (!g.committed) { state.history.push(g.before); g.committed = true; }
-    plans.forEach(i => Object.assign(i.layer,i.next)); state.render(); state.status(`缩放 ${Math.round(factor*100)}% · 旋转 ${Math.round(angle)}° · Esc 取消`);
+    plans.forEach(i => Object.assign(i.layer,i.next)); state.render(); state.status(`宽 ${Math.round(fx*100)}% · 高 ${Math.round(fy*100)}% · Shift 等比 · Esc 取消`);
   }
-  function cancel(g) { for (const i of g.originals) Object.assign(i.layer,i.original); if (g.committed) { state.history.undoStack=g.undo;state.history.redoStack=g.redo; } state.setDirty(g.dirty); state.render(); state.refresh(); state.status('已取消变换'); }
+  function cancel(g) { for (const i of g.originals) {for(const key of Object.keys(i.layer))if(!Object.hasOwn(i.original,key))delete i.layer[key];Object.assign(i.layer,i.original);} if (g.committed) { state.history.undoStack=g.undo;state.history.redoStack=g.redo; } state.setDirty(g.dirty); state.render(); state.refresh(); state.status('已取消变换'); }
   return { update, move, cancel };
 }

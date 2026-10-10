@@ -1,8 +1,9 @@
-import { textLayer, bounds, textFont } from './editor.js';
+import { affine, multiply,vector,decompose } from './affine.mjs';
+import { textLayer, bounds, textFont,canvas } from './editor.js';
 import { canonicalize, isVisible } from './layer-tree.js';
 const $ = id => document.getElementById(id);
-const signature = l => JSON.stringify(['text','font','fontSize','color','bold','align','lineHeight','letterSpacing','textMode','boxWidth','boxHeight','x','y','scale','rotation','opacity','blend'].map(k => l[k]));
-export function clearTextCache(layer) { if (layer.type === 'text' && layer.textRasterCache) { delete layer.canvas; delete layer.data; delete layer.textRasterCache; } }
+const signature = l => JSON.stringify(['scaleY','skew','italic','fontWeight','underline','text','font','fontSize','color','bold','align','lineHeight','letterSpacing','textMode','boxWidth','boxHeight','x','y','scale','rotation','opacity','blend'].map(k => l[k]));
+export function clearTextCache(layer) { if (layer.type === 'text' && layer.textRasterCache) { if(layer.textGeometry){const m=layer.textGeometry.matrix,a=affine(layer),matrix=multiply(a,m.slice(0,4)),measure=canvas(1,1).getContext('2d');measure.font=textFont(layer);measure.textBaseline='top';const ascent=measure.measureText('Mg').actualBoundingBoxAscent;measure.textBaseline='alphabetic';const baseline=measure.measureText('Mg').actualBoundingBoxAscent-ascent,origin=layer.textCacheOrigin||layer,offset=vector(a,{x:m[4]-origin.x,y:m[5]-origin.y}),top=vector(matrix,{x:0,y:-baseline});Object.assign(layer,{x:layer.x+offset.x+top.x,y:layer.y+offset.y+top.y,...decompose(matrix)});delete layer.textGeometry;} delete layer.canvas; delete layer.data; delete layer.textRasterCache; } }
 export function setupTypeEditor(state) {
   let session = null; const input = $('inline-text');
   function option(id, value) { const select = $(id); if (![...select.options].some(o => o.value === value)) select.add(new Option(value,value)); select.value = value; }
@@ -14,7 +15,7 @@ export function setupTypeEditor(state) {
     const layer = session.layer, size = bounds(layer);
     if (input.value !== layer.text) input.value = layer.text;
     input.style.left = layer.x + 'px'; input.style.top = layer.y + 'px'; input.style.width = Math.max(24,size.width) + 'px'; input.style.height = Math.max(layer.fontSize * (layer.lineHeight || 1.35),size.height) + 'px'; input.style.font = textFont(layer); input.style.lineHeight = layer.lineHeight || 1.35; input.style.textAlign = layer.align || 'left'; input.style.letterSpacing = (layer.letterSpacing || 0)+'px'; input.style.caretColor = layer.color;
-    input.style.transform = `rotate(${layer.rotation}deg) scale(${layer.scale})`; input.wrap = layer.textMode === 'paragraph' ? 'soft' : 'off'; input.style.whiteSpace = layer.textMode === 'paragraph' ? 'pre-wrap' : 'pre'; input.style.wordBreak = layer.textMode === 'paragraph' ? 'break-all' : 'normal';
+    input.style.transform = `matrix(${affine(layer).join(',')},0,0)`; input.wrap = layer.textMode === 'paragraph' ? 'soft' : 'off'; input.style.whiteSpace = layer.textMode === 'paragraph' ? 'pre-wrap' : 'pre'; input.style.wordBreak = layer.textMode === 'paragraph' ? 'break-all' : 'normal';
   }
   function finish(commit = true) {
     if (!session) return;
@@ -22,12 +23,12 @@ export function setupTypeEditor(state) {
     const changed = signature(s.layer) !== s.signature;
     if (!commit || s.created && !s.layer.text.trim()) {
       if (s.created) { const p = state.project(); p.layers = p.layers.filter(l => l !== s.layer); p.activeId = s.before.activeId; }
-      else { for (const key of Object.keys(s.layer)) if (!(key in s.original)) delete s.layer[key]; Object.assign(s.layer,s.original); }
+      else { for (const key of Object.keys(s.layer)) if (!(key in s.original)) delete s.layer[key]; for(const key of Object.keys(s.layer))if(!Object.hasOwn(s.original,key))delete s.layer[key];Object.assign(s.layer,s.original); }
       state.select(state.active()); state.setDirty(s.dirty); state.render(); state.refresh(); state.status('已取消文字编辑');
     } else if (changed || s.created) {
       if (s.created || s.layer.name === '文字' || s.layer.name === '输入文字') s.layer.name = s.layer.text.split('\n')[0].slice(0,40) || '文字';
       state.history.push(s.before); state.changed('文字编辑完成，可再次用 T 工具单击修改');
-    } else { Object.assign(s.layer,s.original); state.setDirty(s.dirty); state.render(); state.refresh(); }
+    } else { for(const key of Object.keys(s.layer))if(!Object.hasOwn(s.original,key))delete s.layer[key];Object.assign(s.layer,s.original); state.setDirty(s.dirty); state.render(); state.refresh(); }
     update(); state.focus();
   }
   function begin(layer, created = false, before = state.snapshot(), previousDirty = state.dirty()) {
@@ -52,6 +53,6 @@ export function setupTypeEditor(state) {
     const l = state.active(); if (l.type !== 'text' || state.locked(l) || !$(id).checkValidity()) return;
     if (!session) state.checkpoint(); clearTextCache(l); l[key] = convert($(id).value); if (session) { state.setDirty(true); state.render(); state.refresh(); update(); input.focus(); } else state.changed();
   };
-  $('type-bold').onclick = () => { const l = state.active(); if (l.type !== 'text') { $('type-bold').classList.toggle('active'); return; } if (state.locked(l)) return; if (!session) state.checkpoint(); clearTextCache(l); l.bold = !l.bold; if (session) { state.setDirty(true); state.render(); state.refresh(); update(); } else state.changed(); };
+  $('type-bold').onclick = () => { const l = state.active(); if (l.type !== 'text') { $('type-bold').classList.toggle('active'); return; } if (state.locked(l)) return; if (!session) state.checkpoint(); clearTextCache(l); l.bold = !l.bold;l.fontWeight=l.bold?700:400; if (session) { state.setDirty(true); state.render(); state.refresh(); update(); } else state.changed(); };
   return { update, begin, create, finish, get editing() { return !!session; }, owns(layer) { return session?.layer === layer; } };
 }

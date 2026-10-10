@@ -25,6 +25,7 @@ BUILD_PLAN.md
 
 # Windows desktop port
 node_modules/
+/test-results/
 windows/test-results/
 windows/playwright-report/
 

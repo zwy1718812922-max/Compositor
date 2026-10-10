@@ -1,24 +1,24 @@
-# Windows project format v1–v4
+# Windows project format v1–v5
 
-Windows 0.5.0 saves v4 and reads v1–v3. See [v4 additions](../docs/windows-format-v4.md). The native WebView2 and Electron builds use the same renderer, schema validation, and PSD conversion code.
+Windows 0.6.0 saves v5 and reads v1–v4. See [v5 additions](../docs/windows-format-v5.md) and [v4 additions](../docs/windows-format-v4.md). The native WebView2 and Electron builds use the same renderer, schema validation, and PSD conversion code.
 
 The Windows port uses a separate UTF-8 JSON format, with extension `.ccomp`, to avoid claiming compatibility with the upstream macOS `.comp` package. The macOS manifest schema and `ProjectManifest.current` are unchanged.
 
 - `format`: `com.compositor.windows`
-- `version`: `3` for new saves; versions `1` and `2` remain readable
+- `version`: `5` for new saves; versions `1`–`4` remain readable
 - `width`, `height`: integer document pixels, each 1–16384 in v2; v1 remains limited to 4096
 - `resolution`: pixels/inch, finite 1–9600, required by v2; v1 defaults to 72 on load
 - `colorSpace`: `sRGB`, required by v2
 - `activeId`: an existing layer ID
 - `layers`: bottom-to-top array, 1–100 layers
 
-Every layer has a unique string `id`, a `name` up to 200 characters, a `type` (`raster`, `text`, or v3 `group`), numeric `x`/`y` (±100000), `scale` (0.01–100), clockwise `rotation` in degrees (±36000), `opacity` (0–1), Canvas 2D `blend`, and boolean `visible`/`locked`.
+Every layer has a unique string `id`, a `name` up to 200 characters, a `type` (`raster`, `text`, v3 `group`, or v5 `fill` / `adjustment`), numeric `x`/`y` (±100000), `scale` (0.01–100), clockwise `rotation` in degrees (±36000), `opacity` (0–1), Canvas 2D `blend`, and boolean `visible`/`locked`.
 
-Transforms use the top-left origin: translate, rotate, uniformly scale. Supported blends: source-over, multiply, screen, overlay, darken, lighten, difference, soft-light, hard-light.
+Transforms use the top-left origin: translate, rotate, scale. v1–v4 use uniform scaling; v5 adds independent vertical scale and shear as described in the v5 additions. Supported blends: source-over, multiply, screen, overlay, darken, lighten, difference, soft-light, hard-light.
 
 Raster layers embed a PNG data URL in `data`. Pixels are local to that layer and may be smaller than the document. Layer raster dimensions are 1–16384 in v2 (1–4096 in v1); the total raster and mask budget is 64 × 1024 × 1024 pixels. The document canvas itself has the same total pixel budget. These expanded bounds allow A3/A2 at 300 ppi without silently reducing the chosen resolution.
 
-Text layers store `text` (up to 10000 UTF-16 code units), `font` (family name, up to 200 characters), `fontSize` (1–1000 document pixels), `color` (#rrggbb), and boolean `bold`. Newlines are explicit; text does not wrap automatically. Line height is 1.35 × fontSize. The text baseline is top; rendering uses installed fonts with Microsoft YaHei and sans-serif fallbacks.
+Text layers store `text` (up to 10000 UTF-16 code units), `font` (family name, up to 200 characters), `fontSize` (1–1000 document pixels), `color` (#rrggbb), and boolean `bold`. Legacy text uses explicit newlines and line height 1.35 × fontSize. v4 adds paragraph wrapping, alignment, tracking, leading, and PSD image caches; v5 adds font weight, italic, underline, and affine PSD text matrices. Rendering uses installed fonts with Microsoft YaHei and sans-serif fallbacks.
 
 The complete UTF-8 file is capped at 128 MiB. Validation and image decoding complete before replacing the current editor document. Saves use a temporary sibling file and rename over the destination; the previous file is retained if validation or writing fails. Undo, viewport, selection outline, and document display name are not serialized. PNG/JPEG exports do not clear the project's dirty state.
 
@@ -33,4 +33,4 @@ Windows 0.4.0 saves format v3. The flat array retains bottom-to-top **sibling** 
 
 Any v3 layer or group may have `mask`: a grayscale opaque PNG `data`, world-space x/y, uniform scale, clockwise rotation, `defaultColor` (0–255 outside the bitmap), `density` (0–1), document-space `feather` (0–100 pixels), and boolean `enabled` / `linked`. White reveals, black hides. Density interpolates the mask toward white; feather blurs mask edges. A linked mask follows the image transform; an unlinked mask is positioned independently. Masks count toward the same 64 × 1024 × 1024 source-pixel budget as raster layers. Cached render surfaces are never saved. Mask editing may expand/normalize a partial bitmap to cover the document while retaining its previous out-of-canvas extent. Crop/canvas resizing shifts all bitmap and mask positions while groups retain fixed transforms; image resizing resamples both image and mask pixels and scales positions and feather.
 
-PSD is an exchange format, not the editable Windows project schema. Export renders text and uniform transforms into ordinary raster data, retains groups, opacity, supported blends, masks and clipping, and writes a full-resolution composite and resolution metadata. Import accepts RGB 8-bit sRGB/square-pixel files within the same limits. PSD text is rasterized; complex unsupported content requires explicit composite-preview confirmation. The PSD mask's editing link choice is not retained through exchange; it defaults to linked on import. Windows `.ccomp` v3 retains this choice and editable text.
+PSD is an exchange format, separate from the editable Windows project schema. Current exports retain groups, opacity, supported blends, masks, clipping, common FX, simple editable text, supported fill/adjustment descriptors, guides, a full-resolution composite, and resolution metadata. Image transforms and unsupported procedural effects are baked into each individual layer. Import accepts RGB 8-bit sRGB/square-pixel files within the same limits. Single-style text with an invertible affine matrix is editable, with its original image cache retained until editing; complex text remains an individual raster layer. Unsupported content is listed in an import report, with a separate composite-preview option. The PSD mask's editing link choice is not retained through exchange; it defaults to linked on import. Windows `.ccomp` retains editable parameters, text and mask link settings.

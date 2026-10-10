@@ -3,6 +3,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { validateStyles } = require('./src/effect-model.mjs');
 
+const {decompose}=require('./src/affine.mjs');
+const { validateFill,validateAdjustment }=require('./src/fill-model.mjs');
 const FORMAT = 'com.compositor.windows';
 const MAX_BYTES = 128 * 1024 * 1024;
 const blends = ['source-over', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'difference', 'soft-light', 'hard-light'];
@@ -16,7 +18,7 @@ function pngPixels(data, limit = 16384) {
   return w * h;
 }
 function validateProject(p) {
-  if (!p || p.format !== FORMAT || ![1, 2, 3, 4].includes(p.version)) throw new Error('不支持的项目格式或版本。请打开 .ccomp 项目。');
+  if (!p || p.format !== FORMAT || ![1, 2, 3, 4, 5].includes(p.version)) throw new Error('不支持的项目格式或版本。请打开 .ccomp 项目。');
   const limit = p.version === 1 ? 4096 : 16384;
   if (![p.width, p.height].every(n => Number.isInteger(n) && number(n, 1, limit)) || p.width * p.height > 64 * 1024 * 1024) throw new Error('画布尺寸超过此项目版本的限制。');
   if (p.version >= 2 && (!number(p.resolution, 1, 9600) || p.colorSpace !== 'sRGB')) throw new Error('分辨率或颜色空间无效。');
@@ -26,7 +28,7 @@ function validateProject(p) {
   for (const l of p.layers) {
     if (!l || typeof l.id !== 'string' || !l.id.length || l.id.length > 200 || ids.has(l.id)) throw new Error('图层标识无效或重复。');
     ids.add(l.id);
-    if (typeof l.name !== 'string' || l.name.length > 200 || !(p.version >= 3 ? ['raster', 'text', 'group'] : ['raster', 'text']).includes(l.type)) throw new Error('图层信息无效。');
+    if (typeof l.name !== 'string' || l.name.length > 200 || !(p.version >= 3 ? (p.version>=5?['raster','text','group','fill','adjustment']:['raster','text','group']) : ['raster', 'text']).includes(l.type)) throw new Error('图层信息无效。');
     if (!number(l.x, -100000, 100000) || !number(l.y, -100000, 100000) || !number(l.rotation, -36000, 36000) || !number(l.scale, 0.01, 100) || !number(l.opacity, 0, 1) || !(blends.includes(l.blend) || l.type === 'group' && l.blend === 'pass-through') || typeof l.visible !== 'boolean' || typeof l.locked !== 'boolean') throw new Error('图层属性无效。');
     if (p.version < 3 && (l.mask || l.parentId || l.clipping)) throw new Error('蒙版、图层组和剪贴蒙版需要 v3 项目格式。');
     if (l.clipping !== undefined && typeof l.clipping !== 'boolean') throw new Error('剪贴蒙版标志无效。');
@@ -36,10 +38,15 @@ function validateProject(p) {
     if (l.stylesEnabled !== undefined && typeof l.stylesEnabled !== 'boolean' || l.fillOpacity !== undefined && !number(l.fillOpacity, 0, 1)) throw new Error('图层样式或填充不透明度无效。');
     for (const key of ['textRasterCache','stylesModified']) if (l[key] !== undefined && typeof l[key] !== 'boolean') throw new Error('文字缓存或样式修改标志无效。');
     if (l.psdEffects && JSON.stringify(l.psdEffects).length > 65536) throw new Error('PSD 样式元数据过大。');
-    if (l.type === 'raster') {
+    for(const t of [l,l.mask].filter(Boolean)){if(t.scaleY!==undefined&&!number(t.scaleY,.01,100)||t.skew!==undefined&&!number(t.skew,-100,100))throw new Error('二维变换属性无效。');if(p.version<5&&(t.scaleY!==undefined||t.skew!==undefined))throw new Error('二维变换需要 v5。');}
+    if(l.type==='fill'){validateFill(l);pixels+=l.width*l.height;if(l.fill.data)pixels+=pngPixels(l.fill.data,512);}
+    else if(l.type==='adjustment')validateAdjustment(l);
+    else if (l.type === 'raster') {
       pixels += pngPixels(l.data, limit);
     } else if (l.type === 'text') {
       if (typeof l.text !== 'string' || l.text.length > 10000 || typeof l.font !== 'string' || l.font.length > 200 || !number(l.fontSize, 1, 1000) || !/^#[\da-f]{6}$/i.test(l.color) || typeof l.bold !== 'boolean') throw new Error('文字图层信息无效。');
+      if(l.fontWeight!==undefined&&!number(l.fontWeight,100,900)||['italic','underline'].some(k=>l[k]!==undefined&&typeof l[k]!=='boolean'))throw new Error('字体样式无效。');
+      if(l.textGeometry){const m=l.textGeometry.matrix;if(!Array.isArray(m)||m.length!==6||!m.every(n=>number(n,-100000,100000)))throw new Error('PSD 文字矩阵无效。');decompose(m.slice(0,4));}
       if (l.textMode !== undefined && !['point', 'paragraph'].includes(l.textMode) || l.align !== undefined && !['left', 'center', 'right'].includes(l.align) || l.lineHeight !== undefined && !number(l.lineHeight, .5, 5) || l.letterSpacing !== undefined && !number(l.letterSpacing, -100, 1000)) throw new Error('文字排版属性无效。');
       if (l.textMode === 'paragraph' && (!number(l.boxWidth, 1, 16384) || !number(l.boxHeight, 1, 16384))) throw new Error('段落文字框尺寸无效。');
       if (l.textRasterCache) pixels += pngPixels(l.data, limit);
@@ -50,6 +57,8 @@ function validateProject(p) {
       pixels += pngPixels(m.data, limit);
     }
   }
+  if(p.guides!==undefined&&(!Array.isArray(p.guides)||p.guides.length>200||p.guides.some(g=>!g||typeof g.id!=='string'||!['x','y'].includes(g.axis)||!number(g.position,-100000,100000))))throw new Error('参考线无效。');
+  if(p.ruler&&(!['px','in','cm','mm','pt'].includes(p.ruler.unit)||!p.ruler.origin||!number(p.ruler.origin.x,-100000,100000)||!number(p.ruler.origin.y,-100000,100000)||['visible','guidesVisible','locked'].some(k=>typeof p.ruler[k]!=='boolean')))throw new Error('标尺属性无效。');
   const byId = new Map(p.layers.map(l => [l.id, l]));
   for (const l of p.layers) {
     const chain = new Set([l.id]); let parent = l.parentId;

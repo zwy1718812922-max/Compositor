@@ -1,6 +1,6 @@
 {
   "name": "compositor-windows-zh",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Compositor 中文 Windows 桌面版",
   "author": "Compositor contributors",
   "license": "MIT",
@@ -37,7 +37,12 @@
       "assets/*",
       "LICENSE",
       "psd-effects.cjs",
-      "psd-worker.cjs"
+      "psd-worker.cjs",
+      "native/Fonts.cs",
+      "native/fonts.ps1",
+      "ai/**/*",
+      "ai-service.cjs",
+      "psd-adjustments.cjs"
     ],
     "win": {
       "target": [
@@ -61,7 +66,12 @@
       "language": "2052",
       "createDesktopShortcut": true
     },
-    "compression": "normal"
+    "compression": "normal",
+    "asarUnpack": [
+      "ai/**/*",
+      "native/fonts.ps1",
+      "native/Fonts.cs"
+    ]
   },
   "dependencies": {
     "ag-psd": "31.0.3",

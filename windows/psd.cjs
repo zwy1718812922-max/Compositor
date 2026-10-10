@@ -1,3 +1,5 @@
+const {decompose}=require('./src/affine.mjs');
+const {exportAdjustment,importAdjustment,exportFill,importFill}=require('./psd-adjustments.cjs');
 const crypto = require('node:crypto');
 const { PNG } = require('pngjs');
 const { readPsd, writePsdBuffer, getLayerImageData, getLayerMaskImageData, getCompositeImageData, initializeCanvas } = require('ag-psd');
@@ -59,10 +61,10 @@ function readPsdDocument(buffer) {
       if (node.mask) pixels += sizePixels((node.mask.right || 0) - (node.mask.left || 0), (node.mask.bottom || 0) - (node.mask.top || 0));
       if (pixels > MAX_PIXELS) throw new Error('PSD 图层与蒙版合计超过 6400 万像素。');
       if (!toCanvasBlend[node.blendMode || 'normal']) unsupported.add('未支持的混合模式');
-      if (node.adjustment) unsupported.add('调整图层');
+      if(node.adjustment&&!importAdjustment(node.adjustment))unsupported.add('暂未支持的调整图层');
       if (node.knockout || node.channelBlendingRestrictions?.length) unsupported.add('高级混合选项');
       if (node.blendingRanges && [node.blendingRanges.compositeGrayBlendSource, node.blendingRanges.compositeGraphBlendDestinationRange, ...node.blendingRanges.ranges.flatMap(r => [r.sourceRange, r.destRange])].some(range => range && range.some((v, i) => v !== [0,0,255,255][i]))) unsupported.add('混合颜色带');
-      if (node.vectorMask || node.vectorFill || node.vectorStroke || node.realMask) unsupported.add('矢量或双重蒙版');
+      if (node.vectorMask || node.vectorFill&&!importFill(node.vectorFill) || node.vectorStroke || node.realMask) unsupported.add('矢量或双重蒙版');
       if (node.placedLayer) unsupported.add('智能对象');
       if (node.artboard) unsupported.add('画板');
       if (node.text && (!node.right || !node.bottom || node.right === node.left || node.bottom === node.top)) unsupported.add('未缓存外观的文字图层');
@@ -76,7 +78,7 @@ function readPsdDocument(buffer) {
   let resolution = psd.imageResources?.resolutionInfo?.horizontalResolution || 72;
   if (psd.imageResources?.resolutionInfo?.horizontalResolutionUnit === 'PPCM') resolution *= 2.54;
   resolution = Math.max(1, Math.min(9600, resolution));
-  const project = { format: 'com.compositor.windows', version: 4, width: psd.width, height: psd.height, resolution, colorSpace: 'sRGB', layers: [], activeId: '' };
+  const project = { format: 'com.compositor.windows', version: 5, width: psd.width, height: psd.height, resolution, colorSpace: 'sRGB', guides:(psd.imageResources?.gridAndGuidesInformation?.guides||[]).slice(0,200).map(g=>({id:crypto.randomUUID(),axis:g.direction==='vertical'?'x':'y',position:g.location})), layers: [], activeId: '' };
   if (!count) {
     const pixels = getCompositeImageData(psd);
     if (!pixels) throw new Error('PSD 包含未支持的内容，且没有可用的合成预览。请先栅格化相关图层。');
@@ -93,9 +95,12 @@ function readPsdDocument(buffer) {
         l.data = bitmap ? dataURL(bitmap) : dataURL({ width: 1, height: 1, data: new Uint8Array(4) });
         if (node.text) {
           const t = node.text, style = t.style || t.styleRuns?.[0]?.style || {}, runs = t.styleRuns || [], matrix = t.transform || [1,0,0,1,0,0];
-          const simple = t.orientation !== 'vertical' && !t.warp?.style?.match(/^(?!none$).+/) && runs.every(r => JSON.stringify({ ...style, ...r.style }) === JSON.stringify(style)) && Math.abs(matrix[1] || 0) < .0001 && Math.abs(matrix[2] || 0) < .0001 && Math.abs((matrix[0] || 1) - (matrix[3] || 1)) < .0001;
+          let geometry;try{geometry=decompose(matrix.slice(0,4));}catch{} const axisUniform=Math.abs(matrix[1]||0)<.0001&&Math.abs(matrix[2]||0)<.0001&&Math.abs((matrix[0]||1)-(matrix[3]||1))<.0001;
+          const simple = !!geometry && t.orientation !== 'vertical' && !t.warp?.style?.match(/^(?!none$).+/) && runs.every(r => JSON.stringify({ ...style, ...r.style }) === JSON.stringify(style));
           if (simple) {
             Object.assign(l, { type: 'text', text: t.text.replace(/\r/g, '\n').replace(/\n$/, ''), font: (style.font?.name || 'Microsoft YaHei').replace(/-?(Regular|Bold|Italic|MT)$/g, '').replace(/^MicrosoftYaHei$/, 'Microsoft YaHei'), psdFont: style.font?.name, fontSize: Math.max(1, Math.min(1000, (style.fontSize || 64) * Math.abs(matrix[0] || 1))), color: colorHex(style.fillColor), bold: Boolean(style.fauxBold || /Bold/i.test(style.font?.name || '')), textMode: t.shapeType === 'box' ? 'paragraph' : 'point', align: ['left','center','right'].includes(t.paragraphStyle?.justification) ? t.paragraphStyle.justification : 'left', textRasterCache: Boolean(bitmap) });
+            l.italic=Boolean(style.fauxItalic||/Italic|Oblique/i.test(style.font?.name||''));l.underline=Boolean(style.underline);
+            if(!axisUniform){l.fontSize=Math.max(1,Math.min(1000,style.fontSize||64));l.textGeometry={matrix:[...matrix]};}
             l.psdTextSource = t; l.textCacheOrigin = { x:l.x,y:l.y };
             if (l.textMode === 'paragraph') { l.boxWidth = Math.max(1, Math.min(16384, (t.boxBounds?.[2] - t.boxBounds?.[0]) || bitmap?.width || 300)); l.boxHeight = Math.max(1, Math.min(16384, (t.boxBounds?.[3] - t.boxBounds?.[1]) || bitmap?.height || 200)); }
             if (!bitmap) { l.x = matrix[4] || 0; l.y = (matrix[5] || 0) - l.fontSize; delete l.data; }
@@ -105,9 +110,11 @@ function readPsdDocument(buffer) {
       }
       if (node.fillOpacity !== undefined) l.fillOpacity = node.fillOpacity;
       if (node.effects) { l.styles = importEffects(node.effects, resolution, warnings, l.name); l.stylesEnabled = !node.effects.disabled; l.psdEffects = node.effects; }
-      if (node.adjustment) warnings.add(`「${l.name}」调整图层保留为独立占位层，调整计算暂不支持，画面可能与 PS 不同。`);
+      if(node.adjustment&&importAdjustment(node.adjustment)){warnings.add('调整图层已恢复为可编辑参数；部分色彩算法与 Photoshop 存在差异，请对照合成预览。');l.type='adjustment';l.adjustment=importAdjustment(node.adjustment);delete l.data;}
+      if(node.vectorFill&&importFill(node.vectorFill)&&!node.vectorMask){l.type='fill';l.fill=importFill(node.vectorFill);l.width=psd.width;l.height=psd.height;l.x=l.y=0;delete l.data;}
+      if (node.adjustment&&!importAdjustment(node.adjustment)) warnings.add(`「${l.name}」调整图层保留为独立占位层，调整计算暂不支持，画面可能与 PS 不同。`);
       if (node.placedLayer) warnings.add(`「${l.name}」智能对象使用其独立缓存像素，仍是单独图层。`);
-      if (node.vectorMask || node.vectorFill || node.vectorStroke || node.realMask) warnings.add(`「${l.name}」的矢量或双重蒙版未完整重现，请对照合成预览。`);
+      if (node.vectorMask || node.vectorFill&&!importFill(node.vectorFill) || node.vectorStroke || node.realMask) warnings.add(`「${l.name}」的矢量或双重蒙版未完整重现，请对照合成预览。`);
       if (l.type === 'group' && l.clipping && l.blend === 'pass-through') l.blend = 'source-over';
       if (node.mask) {
         const bitmap = getLayerMaskImageData(node), color = node.mask.defaultColor ?? 255;
@@ -125,11 +132,13 @@ function writePsdDocument(project, composite) {
   validateProject(project); pngPixels(composite);
   const imageData = pixelData(composite);
   if (imageData.width !== project.width || imageData.height !== project.height) throw new Error('PSD 合成图尺寸与项目不一致。');
-  if (project.layers.some(l => l.type === 'text' || l.scale !== 1 || l.rotation !== 0 || l.mask && (l.mask.scale !== 1 || l.mask.rotation !== 0))) throw new Error('PSD 导出需要先准备像素数据。');
+  if (project.layers.some(l => l.type === 'text' || l.scale !== 1 || (l.scaleY??1)!==1 || !!l.skew || l.rotation !== 0 || l.mask && (l.mask.scale !== 1 || (l.mask.scaleY??1)!==1 || !!l.mask.skew || l.mask.rotation !== 0))) throw new Error('PSD 导出需要先准备像素数据。');
   const tree = parentId => project.layers.filter(l => (l.parentId || null) === parentId).map(l => {
     const node = { name: l.name, left: Math.round(l.x), top: Math.round(l.y), blendMode: toPsdBlend[l.blend], opacity: l.opacity, hidden: !l.visible, clipping: Boolean(l.clipping), protected: { composite: l.locked, position: l.locked, transparency: l.locked }, transparencyProtected: l.locked };
     if (l.type === 'group') { node.children = tree(l.id); node.opened = !l.collapsed; }
+    else if(l.type==='adjustment')node.adjustment=exportAdjustment(l.adjustment);
     else node.imageData = pixelData(l.data);
+    if(l.psdFill)node.vectorFill=exportFill(l.psdFill);
     if (l.psdText) node.text = l.psdText;
     if (l.fillOpacity !== undefined) node.fillOpacity = l.fillOpacity;
     if (l.styles || l.psdEffects) node.effects = exportEffects(l);
@@ -140,7 +149,7 @@ function writePsdDocument(project, composite) {
     return node;
   });
   const resolution = project.resolution;
-  const data = writePsdBuffer({ width: project.width, height: project.height, bitsPerChannel: 8, colorMode: 3, imageData, children: tree(null), imageResources: { resolutionInfo: { horizontalResolution: resolution, horizontalResolutionUnit: 'PPI', widthUnit: 'Inches', verticalResolution: resolution, verticalResolutionUnit: 'PPI', heightUnit: 'Inches' } } }, { noBackground: true, generateThumbnail: false, trimImageData: false });
+  const data = writePsdBuffer({ width: project.width, height: project.height, bitsPerChannel: 8, colorMode: 3, imageData, children: tree(null), imageResources: {gridAndGuidesInformation:{guides:(project.guides||[]).map(g=>({direction:g.axis==='x'?'vertical':'horizontal',location:g.position}))}, resolutionInfo: { horizontalResolution: resolution, horizontalResolutionUnit: 'PPI', widthUnit: 'Inches', verticalResolution: resolution, verticalResolutionUnit: 'PPI', heightUnit: 'Inches' } } }, { noBackground: true, generateThumbnail: false, trimImageData: false });
   if (data.length > MAX_BYTES) throw new Error('PSD 导出超过 128 MB，请减少图层或缩小尺寸。');
   return data;
 }

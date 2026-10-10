@@ -57,9 +57,11 @@ git fetch upstream
 git remote add origin https://github.com/你的用户名/你的仓库.git
 git push -u origin main
 git push -u origin codex/windows-advanced
-git push origin windows-v0.4.0 windows-v0.5.0
+git push origin windows-v0.4.0 windows-v0.5.0 windows-v0.6.0
 ```
 
 安装包继续在 `windows/dist` 本地生成，发布时作为 Release 附件上传，无需提交到源码仓库。Git 只保存本地历史；异地备份需要额外推送至自己的远程仓库。
 
 0.5.0 的 PSD、FX、文字、变换、对齐吸附及 WebView2 轻量版在 `codex/windows-advanced` 开发，完成后记录为 `windows-v0.5.0` 标签；原 0.4.0 基线保留。
+
+0.6.0 的自由变换、文档关闭、填充与调整、本地字体、参数拖动、标尺及 NPU 抠图在同一分支继续开发，并记录为 `windows-v0.6.0`。
