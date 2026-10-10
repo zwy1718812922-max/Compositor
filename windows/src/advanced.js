@@ -1,9 +1,9 @@
 import { hasEffects } from './effect-model.mjs';
-import { canvas, groupLayer, layerSurface, invalidatePixels, updateLinkedMask, transformPoint, layerTransform } from './editor.js';
+import { canvas, rasterLayer, groupLayer, layerSurface, invalidatePixels, updateLinkedMask, transformPoint, layerTransform } from './editor.js';
 import { checkSize } from './operations.js';
 import { childrenOf, descendants, ancestors, canonicalize, moveSibling, isLocked } from './layer-tree.js';
 
-export const pixelCount = layer => (layer.type==='fill'?layer.width*layer.height:0)+ [layer, layer.mask].reduce((n, t) => n + (t?.canvas ? t.canvas.width * t.canvas.height : 0), 0);
+export const pixelCount = layer => [layer, layer.mask].reduce((n, t) => n + (t?.canvas ? t.canvas.width * t.canvas.height : 0), 0);
 export function expandMask(project, layer, capacity) {
   const m = layer.mask;
   if (!m) return;
@@ -33,8 +33,8 @@ export function transformLayer(layer, values) {
 }
 export function moveLayer(project, layer, dx, dy, maskOnly = false) {
   if (maskOnly) { layer.mask.x += dx; layer.mask.y += dy; invalidatePixels(layer.mask); return; }
-  const moving = layer.type === 'group' ? descendants(project, layer.id).filter(l => l.type !== 'group') : [layer];
-  const groupMasks = layer.type === 'group' ? [layer, ...descendants(project, layer.id).filter(l => l.type === 'group')] : [];
+  const moving = layer.type === 'group' ? [...(layer.artboard?[layer]:[]),...descendants(project, layer.id).filter(l => l.type !== 'group'||l.artboard)] : [layer];
+  const groupMasks = layer.type === 'group' ? [layer, ...descendants(project, layer.id).filter(l => l.type === 'group')].filter(l=>!l.artboard) : [];
   if (moving.some(l => isLocked(project, l)) || groupMasks.some(l => isLocked(project, l))) throw new Error('组内有锁定图层，请先解锁。');
   for (const l of moving) if (Math.abs(l.x + dx) > 100000 || Math.abs(l.y + dy) > 100000 || l.mask?.linked && (Math.abs(l.mask.x + dx) > 100000 || Math.abs(l.mask.y + dy) > 100000)) throw new Error('位置超出限制。');
   for (const l of groupMasks) if (l.mask?.linked && (Math.abs(l.mask.x + dx) > 100000 || Math.abs(l.mask.y + dy) > 100000)) throw new Error('组蒙版位置超出限制。');
@@ -48,6 +48,7 @@ export function cloneLayer(layer, idMap) {
     copy.mask = { ...layer.mask, canvas: canvas(layer.mask.canvas.width, layer.mask.canvas.height), _surface: undefined };
     copy.mask.canvas.getContext('2d').drawImage(layer.mask.canvas, 0, 0);
   }
+  if(layer.shape)copy.shape=structuredClone(layer.shape);if(layer.artboard)copy.artboard=structuredClone(layer.artboard);if(layer.paragraph)copy.paragraph=structuredClone(layer.paragraph);
   if(layer.fill)copy.fill=structuredClone(layer.fill);if(layer.adjustment)copy.adjustment=structuredClone(layer.adjustment);delete copy._fill;
   if (layer.styles) copy.styles = structuredClone(layer.styles);
   return copy;
@@ -80,8 +81,8 @@ export function advancedCommand(action, state) {
       for (let i = 0; i < image.data.length; i += 4) { image.data[i] = image.data[i + 1] = image.data[i + 2] = 255 - image.data[i]; image.data[i + 3] = 255; }
       ctx.putImageData(image, 0, 0); m.defaultColor = 255 - m.defaultColor; invalidatePixels(m);
     } else if (action === 'applyMask') {
-      const next = { ...layer, type: 'raster', canvas: layerSurface(project, layer), x: 0, y: 0, scale: 1, scaleY:1,skew:0, rotation: 0 };
-      for (const key of ['fill','width','height','_fill','_pattern','mask', 'text', 'font', 'fontSize', 'bold', 'color', 'data', 'styles', 'psdEffects', 'textRasterCache', 'psdTextSource', 'textMode', 'fillOpacity']) delete next[key];
+      const next = { ...layer, type: 'raster', canvas: layerSurface(project, layer), x: 0, y: 0, scale: 1, scaleY:1,skew:0, rotation: 0,flipX:false,flipY:false };
+      for (const key of ['shape','paragraph','fill','width','height','_fill','_pattern','mask', 'text', 'font', 'fontSize', 'bold', 'color', 'data', 'styles', 'psdEffects', 'textRasterCache', 'psdTextSource', 'textMode', 'fillOpacity']) delete next[key];
       project.layers[project.layers.indexOf(layer)] = next; setTarget('image');
     } else { delete layer.mask; setTarget('image'); }
     changed(action === 'applyMask' ? '蒙版已应用为像素，可撤销恢复' : '已更新图层蒙版');
@@ -99,11 +100,12 @@ export function advancedCommand(action, state) {
     if (positions.at(-1) - positions[0] + 1 !== positions.length) throw new Error('请按 Ctrl 选择相邻图层后分组，以保持叠放顺序。');
     if (siblings[positions[0]].clipping) throw new Error('请同时选择剪贴蒙版的基础图层，再创建图层组。');
     if (ancestors(project, layer).length >= 9 || chosen.some(l => descendants(project, l.id).some(d => ancestors(project, d).length >= 9))) throw new Error('图层组最多嵌套 10 层。');
+    if(chosen.some(l=>l.artboard))throw new Error('画板必须保持根级；可在画板内部创建图层组。');
     capacity(0, 0); checkpoint(); const group = groupLayer('组 ' + (project.layers.filter(l => l.type === 'group').length + 1)); group.parentId = layer.parentId || null;
     project.layers.splice(Math.max(...chosen.map(l => project.layers.indexOf(l))) + 1, 0, group);
     chosen.forEach(l => { l.parentId = group.id; }); canonicalize(project); project.activeId = group.id; selected.clear(); selected.add(group.id); setTarget('image'); changed('已创建图层组；可拖动图层到文件夹，Ctrl 单击多选');
   } else if (action === 'ungroup') {
-    if (layer.type !== 'group') throw new Error('请选择图层组。');
+    if (layer.type !== 'group') throw new Error('请选择图层组。');if(layer.artboard)throw new Error('请用画板工具调整画板，或删除画板及其内容。');
     if (layer.mask || hasEffects(layer) || (layer.fillOpacity ?? 1) !== 1 || layer.opacity !== 1 || layer.blend !== 'pass-through' || !layer.visible || layer.clipping) throw new Error('请先恢复组的穿透、100% 不透明度并移除组蒙版、图层样式及填充效果，才能取消分组而保持外观。');
     const children = childrenOf(project, layer.id);
     if (project.layers.length === 1) throw new Error('至少保留一个图层。');
@@ -120,9 +122,9 @@ export function advancedCommand(action, state) {
   } else if (action === 'deleteLayer') {
     const roots=project.layers.filter(l=>selected.has(l.id)&&!ancestors(project,l).some(a=>selected.has(a.id)));if(!roots.length)roots.push(layer);
     const removed = roots.flatMap(l=>[...(l.type==='group'?descendants(project,l.id):[]),l]);
-    if (removed.length === project.layers.length) throw new Error('至少保留一个图层。');
+    const empty=removed.length===project.layers.length;if(empty&&!roots.some(l=>l.artboard))throw new Error('至少保留一个图层。');
     if (removed.some(l => isLocked(project, l))) throw new Error('组内有锁定图层，请先解锁。');
-    checkpoint(); project.layers = project.layers.filter(l => !removed.includes(l)); canonicalize(project); project.activeId = project.layers.at(-1).id; setTarget('image'); changed('已删除图层');
+    checkpoint(); project.layers = project.layers.filter(l => !removed.includes(l));if(empty){project.width=roots[0].artboard.width;project.height=roots[0].artboard.height;project.layers.push(rasterLayer('空白图层',project.width,project.height));}canonicalize(project); project.activeId = project.layers.at(-1).id; setTarget('image'); changed('已删除图层');
   } else {
     const siblings = childrenOf(project, layer.parentId), delta = action === 'raise' ? 1 : -1;
     if (siblings[siblings.indexOf(layer) + delta]) { checkpoint(); moveSibling(project, layer, delta); changed(); }

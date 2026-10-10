@@ -58,7 +58,7 @@ export function setupShell(command, setTool, refresh) {
   document.querySelectorAll('[data-family]').forEach(el => families[el.dataset.family].forEach(c => el.append(swatch(c, el.dataset.family))));
   $('swatch-search').oninput = () => document.querySelectorAll('.swatch').forEach(b => b.hidden = !b.title.toLowerCase().includes($('swatch-search').value.toLowerCase()));
   $('color').addEventListener('input', colorSwatches); $('gradient-color').addEventListener('input', colorSwatches);
-  $('tool-color').onclick = () => $('color').showPicker();
+  $('tool-color').onclick = () => $('color').click();
   $('swap-colors').onclick = () => { const old = $('color').value; $('color').value = $('gradient-color').value; $('gradient-color').value = old;$('gradient-color').dispatchEvent(new Event('input',{bubbles:true}));$('color').dispatchEvent(new Event('input',{bubbles:true})); colorSwatches(); };
   document.querySelectorAll('.brush-preset').forEach(b => {
     brushPreview(b.querySelector('canvas'), Number(b.dataset.hardness));

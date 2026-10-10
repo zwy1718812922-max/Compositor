@@ -7,6 +7,7 @@ function surfaceCache(){
  return{get(id){const e=entries.get(id);if(e){entries.delete(id);entries.set(id,e);}return e;},put(id,e){const old=entries.get(id);if(old)bytes-=old.surface.width*old.surface.height*4;entries.delete(id);entries.set(id,e);bytes+=e.surface.width*e.surface.height*4;while(bytes>MAX_CACHE_BYTES&&entries.size>1){const key=entries.keys().next().value,item=entries.get(key);entries.delete(key);bytes-=item.surface.width*item.surface.height*4;}},clear(){entries.clear();bytes=0;}};
 }
 export function previewRegion(project,view={}){
+ if(view.source)return {x:0,y:0,width:project.width,height:project.height,scale:1};
  const large=project.width*project.height>MAX_PREVIEW_PIXELS;
  let scale=large?Math.min(1,view.scale*(view.pixelRatio||1)||1):1;
  let x=0,y=0,width=project.width,height=project.height;
@@ -29,6 +30,7 @@ export function renderPreview(target,project,background,proof=true,view={}){
   const oldBounds=proxy._bounds,oldBitmap=proxy.canvas,oldRevision=proxy._revision,oldMask=proxy.mask;
   for(const key of Object.keys(proxy))if(!key.startsWith('_'))delete proxy[key];
   Object.assign(proxy,layer,{x:(layer.x-region.x)*scale,y:(layer.y-region.y)*scale,scale:layer.scale*scale,scaleY:(layer.scaleY??layer.scale)*scale});
+  if(layer.artboard)proxy.artboard={...layer.artboard,width:layer.artboard.width*scale,height:layer.artboard.height*scale};
   proxy._pattern=layer._pattern;
   proxy._revision=pixelRevision(layer.canvas);
   proxy._bounds=layer._bounds||(oldBitmap===layer.canvas&&oldRevision===proxy._revision?oldBounds:undefined);
@@ -46,6 +48,7 @@ export function renderPreview(target,project,background,proof=true,view={}){
  target.dataset.originX=region.x;target.dataset.originY=region.y;target.dataset.worldWidth=region.width;target.dataset.worldHeight=region.height;
  const preview={...project,width,height,layers,_renderCache:state.cache};
  renderInto(target,preview,background,proof);
+ target.dataset.quality=view.source?'native':'preview';
  target.dataset.renderSerial=Number(target.dataset.renderSerial||0)+1;
  return region;
 }

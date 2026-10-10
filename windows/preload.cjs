@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('desktop', {
   aiRun:payload=>ipcRenderer.invoke('ai:run',payload),aiCancel:()=>ipcRenderer.invoke('ai:cancel'),onAiProgress:fn=>ipcRenderer.on('ai:progress',(_e,p)=>fn(p)),
   fonts:()=>ipcRenderer.invoke('fonts:list'),
   importImages: () => ipcRenderer.invoke('image:import'),
+  exportArtboards:(items,format,resolution)=>ipcRenderer.invoke('artboards:export',items,format,resolution),
   exportImage: (data, format, resolution) => ipcRenderer.invoke('image:export', data, format, resolution),
   exportPsd: payload => ipcRenderer.invoke('psd:export', payload),
   windowAction: action => ipcRenderer.invoke('window:action', action),

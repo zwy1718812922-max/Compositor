@@ -9,7 +9,7 @@ function bake(target, draw, background) {
   checkSize(width, height); const result = canvas(width, height), ctx = result.getContext('2d');
   if (background !== undefined) { ctx.fillStyle = `rgb(${background},${background},${background})`; ctx.fillRect(0, 0, width, height); }
   ctx.translate(-x, -y); draw(ctx);
-  return { x, y, scale: 1, scaleY:1, skew:0, rotation: 0, data: result.toDataURL('image/png') };
+  return { x, y, scale: 1, scaleY:1, skew:0, rotation: 0,flipX:false,flipY:false, data: result.toDataURL('image/png') };
 }
 export function preparePsd(project) {
   const output = serialize(project);
@@ -17,10 +17,10 @@ export function preparePsd(project) {
     const converted = { ...output.layers[i] };
     if(layer.type==='adjustment'){ /* Native PSD adjustment descriptors retain editability. */ }
     else if (layer.type !== 'group') {
-      const raw = layer.type === 'text' ? rasterize(layer) : layer;
+      const raw = ['text','shape'].includes(layer.type) ? rasterize(layer) : layer;
       const safe = { ...raw, mask: undefined, opacity: 1, visible: true, blend: 'source-over' };
       // Text's actual ink may extend above its top baseline. Render through rasterize.
-      Object.assign(converted, bake(raw, ctx => drawLayer(ctx, safe))); converted.type = 'raster';if(layer.type==='fill'&&['solid','gradient'].includes(layer.fill.kind)&&layer.x===0&&layer.y===0&&layer.scale===1&&(layer.scaleY??1)===1&&!layer.rotation&&!layer.skew)converted.psdFill=layer.fill;
+      Object.assign(converted, bake(raw, ctx => drawLayer(ctx, safe))); converted.type = 'raster';if(layer.type==='fill'&&['solid','gradient'].includes(layer.fill.kind)&&(layer.fill.alpha??1)===1&&layer.x===0&&layer.y===0&&layer.scale===1&&(layer.scaleY??1)===1&&!layer.rotation&&!layer.skew)converted.psdFill=layer.fill;
       for (const key of ['text', 'font', 'fontSize', 'color', 'bold']) delete converted[key];
       if (layer.type === 'text') {
         const [a,b,c,d] = affine(layer);
@@ -36,6 +36,7 @@ export function preparePsd(project) {
         }
       }
     }
+    if(layer.type==='text'&&(layer.paragraph||layer.strike))delete converted.psdText;
     if (layer.mask) {
       const m = layer.mask;
       converted.mask = { ...converted.mask, ...bake(m, ctx => { layerTransform(ctx, m); ctx.drawImage(m.canvas, 0, 0); }, m.defaultColor) };

@@ -25,9 +25,9 @@ export function setupSnapping(state) {
     if (maskOnly) moving.add(layer); else for (const l of roots) { moving.add(l); if (l.type === 'group') descendants(p,l.id).forEach(c=>moving.add(c)); }
     if ([...moving].some(l=>isLocked(p,l))) throw new Error('所选图层或组内图层已锁定，请先解锁。');
     const originals = [...moving].map(l=>({layer:l,original:{...l,mask:l.mask ? {...l.mask} : undefined}}));
-    const boxes = originals.filter(i=>maskOnly || i.layer.type !== 'group' && isVisible(p,i.layer)).map(i=>worldBox(maskOnly ? i.layer.mask : i.layer)).filter(Boolean);
+    const boxes = originals.filter(i=>maskOnly || (i.layer.type !== 'group'||i.layer.artboard) && isVisible(p,i.layer)).map(i=>worldBox(maskOnly ? i.layer.mask : i.layer)).filter(Boolean);
     const guides=(p.ruler?.guidesVisible===false?[]:p.guides||[]).map(g=>({axis:g.axis,x:g.axis==='x'?g.position:0,y:g.axis==='y'?g.position:0,width:g.axis==='x'?0:p.width,height:g.axis==='y'?0:p.height,canvas:true,guide:true}));
-    const targets = [...guides,{x:0,y:0,width:p.width,height:p.height,canvas:true},...p.layers.filter(l=>l.type!=='group' && !moving.has(l) && isVisible(p,l)).map(worldBox).filter(Boolean)];
+    const targets = [...guides,{x:0,y:0,width:p.width,height:p.height,canvas:true},...p.layers.filter(l=>(l.type!=='group'||l.artboard) && !moving.has(l) && isVisible(p,l)).map(worldBox).filter(Boolean)];
     return {kind:'move',start:point,maskOnly,originals,copy,roots,activeId:p.activeId,selected:[...state.selected()],box:boxes.length ? union(boxes) : null,targets,before:state.snapshot(),dirty:state.dirty(),undo:[...state.history.undoStack],redo:[...state.history.redoStack],committed:false};
   }
   function move(g, point, bypass) {
@@ -45,7 +45,7 @@ export function setupSnapping(state) {
     const plans = g.originals.map(({layer,original:o})=>{
       const next = {...o,mask:o.mask ? {...o.mask} : undefined};
       if (g.maskOnly) { next.mask.x += dx; next.mask.y += dy; }
-      else if (o.type === 'group') { if (next.mask?.linked) { next.mask.x += dx; next.mask.y += dy; } }
+      else if (o.type === 'group') { if(o.artboard){next.x+=dx;next.y+=dy;} if (next.mask?.linked) { next.mask.x += dx; next.mask.y += dy; } }
       else transformLayer(next,{x:o.x+dx,y:o.y+dy});
       for (const t of [next,next.mask].filter(Boolean)) if (Math.abs(t.x)>100000 || Math.abs(t.y)>100000) throw new Error('位置超出限制。');
       return {layer,next};

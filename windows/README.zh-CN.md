@@ -1,21 +1,34 @@
 # Compositor 中文 Windows 版
 
-这是基于 [robbietilton/Compositor](https://github.com/robbietilton/Compositor) 制作的独立 Windows 核心功能移植，版本为 **0.8.0**。原版 SwiftUI / AppKit / Metal 程序保留在仓库中；Windows 轻量版使用系统 WebView2、WinForms 与 Canvas 2D，另保留 Electron 兼容版，在本机运行，不需要账号或联网编辑。
+这是基于 [robbietilton/Compositor](https://github.com/robbietilton/Compositor) 制作的独立 Windows 核心功能移植，版本为 **0.9.0**。原版 SwiftUI / AppKit / Metal 程序保留在仓库中；Windows 轻量版使用系统 WebView2、WinForms 与 Canvas 2D，另保留 Electron 兼容版，在本机运行，不需要账号或联网编辑。
 
 ## 直接运行
 
-- **轻量安装版（推荐）**：运行 `dist/Compositor-ZH-0.8.0-x64-Lite-Setup.exe`，中文向导安装到当前用户程序目录。更新前关闭软件，安装器会阻止正在运行的程序被部分覆盖。
-- **轻量免安装版**：完整解压 `dist/Compositor-ZH-0.8.0-x64-Lite.zip`，双击 `lite-unpacked/Compositor 中文版.exe`。请保留同目录的 DLL、src、assets、ai 和 native 文件夹。
+- **轻量安装版（推荐）**：运行 `dist/Compositor-ZH-0.9.0-x64-Lite-Setup.exe`，中文向导安装到当前用户程序目录。更新前关闭软件，安装器会阻止正在运行的程序被部分覆盖。
+- **轻量免安装版**：完整解压 `dist/Compositor-ZH-0.9.0-x64-Lite.zip`，双击 `lite-unpacked/Compositor 中文版.exe`。请保留同目录的 DLL、src、assets、ai 和 native 文件夹。
 - **本地直接启动**：双击仓库根目录 `启动中文版.cmd`，优先运行轻量版。
 - **Electron 兼容版**：运行 `dist/win-unpacked/Compositor 中文版.exe`；移动时保留整个文件夹。
 
-轻量安装包约 0.71 MB，ZIP 约 0.84 MB（十进制 MB，不包含系统运行时及用户数据）。复用本机 WebView2 和 .NET Framework 4.8+，不打包完整浏览器；Windows 11 通常已具备这些运行时，缺失时程序会提供安装提示。参考 [Microsoft WebView2 分发说明](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)。启动会立即显示动画；本机 0.8.0 WebView2 就绪测试约 0.7 秒，旧 0.4.0 自解压免安装 EXE 为 13.11 秒。其他电脑时间会不同。
+轻量安装包约 0.73 MB，ZIP 约 0.88 MB（十进制 MB，不包含系统运行时及用户数据）。复用本机 WebView2 和 .NET Framework 4.8+，不打包完整浏览器；Windows 11 通常已具备这些运行时，缺失时程序会提供安装提示。参考 [Microsoft WebView2 分发说明](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)。启动会立即显示动画；本机 0.8.0 WebView2 就绪测试约 0.7 秒，旧 0.4.0 自解压免安装 EXE 为 13.11 秒。其他电脑时间会不同。
 
 目标系统为 Windows 11 x64。安装包暂未使用商业代码签名证书签名；Windows 可能显示未知发布者提示。
 
 可通过“打开项目”载入 `examples/中文示例.ccomp`，体验包含可编辑中文文字、图层组和像素蒙版的示例。另有 examples/中文示例.psd 可用于分层交换。界面预览见 `preview.png`。
 
-## 0.8.0 缩放与编辑操作
+## 0.9.0 画布、属性与画板
+
+- 最近项目预览由完整合成生成，包含蒙版、FX 和 CMYK 校样，颜色与画布、导出保持一致。
+- 普通滚轮平移画布，Shift＋滚轮横向平移，Alt＋滚轮以鼠标位置为中心缩放。按住空格临时显示抓手，按住左键拖动画布；在文字输入框中仍输入空格。
+- 缩放直接裁取原始分辨率合成缓存，每帧重新采样当前视口；没有延迟到停止滚轮后才恢复清晰。内容变化后在后台更新缓存。像素图片超过 100% 会显示源像素的自然细节，不生成额外细节。
+- 属性面板按图层类型分区折叠，统一 W/H/X/Y、宽高链接、旋转、翻转和重置。文字保留字体搜索和收藏，增加删除线、缩进、段前/段后间距、列表、文字方向及快速操作。移动工具双击文字自动编辑并全选。
+- U 工具组提供可编辑矩形、椭圆、三角形、多边形和直线。矩形四角圆角可拖动或输入，支持链接/独立圆角、无填充、无描边、描边宽度及虚线；Shift＋U 切换形状。
+- 统一拾色器包含色相/饱和度/亮度区域、新/当前颜色、RGB、HSB、HEX、D50 Lab 和 CMYK 数值、取色、复位和收藏色板。预览实时显示真实内容；取消恢复原值，确定后一步撤销。
+- 图像大小提供像素、毫米、厘米、英寸、预设、宽高链接、分辨率和重新采样方式。关闭重新采样只改物理尺寸/分辨率；开启时后台处理像素和蒙版，保留文字、形状及图层结构，支持取消。
+- 移动工具组增加画板工具，Shift＋V 切换。可拖出画板、拖动标题移动及手柄调整大小，使用“＋”创建相邻画板；属性面板修改尺寸、背景、复制或删除，图层列表修改名称。画板内容随移动并按边界裁切，调整大小保留外部源像素。
+- 新建勾选画板时直接显示所选背景色，只有明确选透明背景才显示方格。不勾选时建立可编辑纯色背景图层。多个画板可按指定画板或全部分别导出 PNG/JPEG；PSD 保留画板组与背景信息。
+- .ccomp 升级为 v7，读取 v1–v6。形状和扩展段落在 PSD 中作为独立像素层保存外观，简单文字继续原生交换；.ccomp 保持新参数可编辑。复杂 Photoshop 排版、专色及 16/32 位 PSD/PSB 限制仍保留，见 [格式说明](../docs/windows-format-v7.md)。
+
+## 0.8.0 历史编辑操作
 
 - 大画布连续滚轮缩放和抓手移动直接变换缓存预览，停止约 120 ms 后在后台更新清晰画面，FX 和颜色校样计算不阻塞界面；显示比例计算避免浮点误差引起缓存反复失效。原始图层、保存及导出分辨率不变。本机 113.7 MB 展板连续滚动往返及首次放大到 100%，滚轮处理中位数由 248.4 ms 降到 0.1 ms，测试帧间隔约 16.7 ms；不是对所有设备和文件的帧率保证，方法见 [验证记录](VALIDATION.md)。
 - Ctrl+J 有选区时复制当前图层选区内容为新像素层，保留位置和不规则透明边缘；没有选区时复制所选图层或组。Ctrl+Z 后退，Ctrl+Y 前进，保留 Ctrl+Shift+Z。画笔与橡皮擦支持 `[` / `]`（含中文【】）减小/增大笔尖；输入文字时不会触发这些笔尖快捷键。

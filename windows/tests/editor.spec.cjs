@@ -11,7 +11,7 @@ test.beforeEach(async () => {
     : { args: [path.join(__dirname, '..'), profile], env });
   page = await app.firstWindow(); errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await expect(page.locator('#home-screen')).toBeVisible();await menu('new');await page.locator('#new-name').fill('未命名');await page.locator('[data-category=web]').click();await page.locator('[data-preset=web-1280]').click();await page.locator('#new-background').selectOption('transparent');await page.locator('#create-document').click();await expect(page.locator('#new-dialog')).toBeHidden();await expect(page.locator('#layer-count')).toHaveText('1 个图层');
+  await expect(page.locator('#home-screen')).toBeVisible();await menu('new');await page.locator('#new-name').fill('未命名');await page.locator('[data-category=web]').click();await page.locator('[data-preset=web-1280]').click();await page.locator('#new-background').selectOption('transparent');await page.locator('#create-document').click();await expect(page.locator('#new-dialog')).toBeHidden();await menu('rasterize');await expect(page.locator('#layer-count')).toHaveText('1 个图层');
 });
 test.afterEach(async () => {
   if (app) { await app.evaluate(({ app }) => app.exit(0)); await app.close(); }
@@ -27,15 +27,15 @@ async function menu(command) {
 async function at(x, y) {
   const box = await page.locator('#canvas').boundingBox();
   const size = await page.locator('#canvas').evaluate(c => ({ width: c.width, height: c.height }));
-  return { x: box.x + x / size.width * box.width, y: box.y + y / size.height * box.height };
+  const origin=await page.locator('#canvas').evaluate(c=>({x:Number(c.dataset.originX||0),y:Number(c.dataset.originY||0),width:Number(c.dataset.worldWidth||c.width),height:Number(c.dataset.worldHeight||c.height)}));return {x:box.x+(x-origin.x)/origin.width*box.width,y:box.y+(y-origin.y)/origin.height*box.height};
 }
 async function drag(x1, y1, x2, y2) {
   const a = await at(x1, y1), b = await at(x2, y2);
-  await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 8 }); await page.mouse.up();
+  await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 8 }); await page.mouse.up();if(await page.locator('#layer-type').textContent()==='形状属性'&&await page.locator('.tools [data-tool=rect]').evaluate(b=>b.getAttribute('aria-pressed')==='true'))await menu('rasterize');
 }
-async function pixel(x, y) { return page.locator('#canvas').evaluate((c, p) => Array.from(c.getContext('2d').getImageData(p.x, p.y, 1, 1).data), { x, y }); }
+async function pixel(x, y) { return page.locator('#canvas').evaluate((c, p) => Array.from(c.getContext('2d').getImageData(Math.floor((p.x-Number(c.dataset.originX||0))*c.width/Number(c.dataset.worldWidth||c.width)),Math.floor((p.y-Number(c.dataset.originY||0))*c.height/Number(c.dataset.worldHeight||c.height)),1,1).data), { x, y }); }
 async function edit(id, value) {
-  if(id==='text-content'){if(!await page.locator('#inline-text').isVisible())await page.locator('.edit-text-button').click();await page.locator('#inline-text').fill(String(value));await page.locator('#inline-text').press('Control+Enter');return;}
+  if(id==='text-content'){if(!await page.locator('#inline-text').isVisible())await page.locator('#text-edit-inline').click();await page.locator('#inline-text').fill(String(value));await page.locator('#inline-text').press('Control+Enter');return;}
   if (['layer-x', 'layer-y', 'layer-scale', 'layer-rotation', 'text-content', 'font-size'].includes(id)) await page.getByRole('button', { name: '属性面板', exact: true }).click();
   await page.locator('#' + id).fill(String(value)); await page.locator('#' + id).press('Tab');
 }
@@ -76,11 +76,11 @@ test('中文文字、图层排序、透明度、保存打开与 PNG/JPEG 实际�
   await menu('save'); await expect(page.locator('#dirty-dot')).toBeHidden();
   const saved = JSON.parse(await fs.readFile(projectFile, 'utf8'));
   expect(saved.layers[2].text).toBe('你好，Windows 11\n中文创作');
-  const originalPixels = await page.locator('#canvas').evaluate(c => c.toDataURL());
+  const originalPixels = await displayImage();
   await menu('new'); await page.locator('#new-form button[type=submit]').click();
   await app.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }); }, projectFile);
   await menu('open'); await expect(page.locator('#layer-count')).toHaveText('3 个图层');
-  expect(await page.locator('#canvas').evaluate(c => c.toDataURL())).toBe(originalPixels);
+  expect(await displayImage()).toBe(originalPixels);
   // Plain Save after Open must reuse the opened path, without another dialog.
   await app.evaluate(({ dialog }) => { dialog.showSaveDialog = async () => { throw new Error('不应再次弹出另存为'); }; });
   await edit('text-content', '修改后'); await menu('save'); await expect(page.locator('#dirty-dot')).toBeHidden();
@@ -173,7 +173,7 @@ test('纸张预设、单位和方向转换、保存预设、真实创建及分�
   await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, file);
   await menu('save'); await expect(page.locator('#document-name')).toHaveText('打印项目');
   const saved = JSON.parse(await fs.readFile(file, 'utf8'));
-  expect(saved.version).toBe(6); expect(saved.resolution).toBe(300); expect(saved.colorSpace).toBe('sRGB');
+  expect(saved.version).toBe(7); expect(saved.resolution).toBe(300); expect(saved.colorSpace).toBe('sRGB');
   for (const format of ['png', 'jpeg']) {
     const output = test.info().outputPath('300ppi.' + format);
     await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, output);
@@ -216,7 +216,7 @@ test('搜索、A3 300ppi 预设和无效输入不会创建画布', async () => {
   await page.locator('#new-resolution').fill('72');
   await expect(page.locator('#create-document')).toBeEnabled();
   await page.locator('#new-dialog [data-dismiss]').click();
-  expect(await page.locator('#canvas').evaluate(c => [c.width, c.height])).toEqual([1280, 800]);
+  expect(await page.locator('#canvas-wrap').evaluate(c => [parseInt(c.style.width), parseInt(c.style.height)])).toEqual([1280, 800]);
 });
 
 test('参考图布局、纸张选择和最小窗口的创建按钮可见', async () => {
@@ -269,29 +269,29 @@ test('裁剪、画布锚点扩展、图像重采样保留文字、尺寸撤销�
   await page.locator('[data-tool=crop]').click(); await drag(100, 100, 740, 500);
   const rectSize = (await page.locator('#selection-size').textContent()).split(' × ').map(Number);
   await page.locator('#viewport').press('Enter');
-  expect(await page.locator('#canvas').evaluate(c => [c.width, c.height])).toEqual(rectSize);
+  expect(await page.locator('#canvas-wrap').evaluate(c => [parseInt(c.style.width), parseInt(c.style.height)])).toEqual(rectSize);
   expect(await pixel(10, 10)).toEqual([255, 0, 0, 255]);
-  await menu('undo'); await expect.poll(() => page.locator('#canvas').evaluate(c => [c.width, c.height])).toEqual([1280, 800]);
+  await menu('undo'); await expect.poll(() => page.locator('#canvas-wrap').evaluate(c => [parseInt(c.style.width), parseInt(c.style.height)])).toEqual([1280, 800]);
   await menu('canvasSize'); await page.locator('#size-width').fill('1440'); await page.locator('#size-height').fill('1000');
-  await page.locator('#size-form button[type=submit]').click();
-  expect(await page.locator('#canvas').evaluate(c => [c.width, c.height])).toEqual([1440, 1000]);
+  await page.locator('#size-form button[type=submit]').click();if(!(await page.locator('#size-error').isVisible()))await expect(page.locator('#size-dialog')).toBeHidden();
+  expect(await page.locator('#canvas-wrap').evaluate(c => [parseInt(c.style.width), parseInt(c.style.height)])).toEqual([1440, 1000]);
   expect((await pixel(10, 10))[3]).toBe(0); expect(await pixel(100, 120)).toEqual([255, 0, 0, 255]);
   await expect(page.locator('#layer-x')).toHaveValue('280'); await expect(page.locator('#layer-y')).toHaveValue('300');
-  await menu('undo'); await expect.poll(() => page.locator('#canvas').evaluate(c => c.width)).toBe(1280);
+  await menu('undo'); await expect.poll(() => page.locator('#canvas-wrap').evaluate(c => parseInt(c.style.width))).toBe(1280);
   await menu('imageSize'); await page.locator('#size-width').fill('640'); await expect(page.locator('#size-height')).toHaveValue('400');
-  await page.locator('#size-resolution').fill('300'); await page.locator('#size-form button[type=submit]').click();
-  expect(await page.locator('#canvas').evaluate(c => [c.width, c.height])).toEqual([640, 400]);
+  await page.locator('#size-resolution').fill('300'); await page.locator('#size-form button[type=submit]').click();if(!(await page.locator('#size-error').isVisible()))await expect(page.locator('#size-dialog')).toBeHidden();
+  expect(await page.locator('#canvas-wrap').evaluate(c => [parseInt(c.style.width), parseInt(c.style.height)])).toEqual([640, 400]);
   await expect(page.locator('#layer-type')).toHaveText('文字图层'); await expect(page.locator('#layer-scale')).toHaveValue('50');
   await expect(page.locator('#layer-x')).toHaveValue('100'); await expect(page.locator('#dimensions')).toContainText('300 ppi');
   const file = test.info().outputPath('尺寸.ccomp');
   await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [target] }); }, file);
-  const before = await page.locator('#canvas').evaluate(c => c.toDataURL()); await menu('save'); await expect(page.locator('#dirty-dot')).toBeHidden();
+  const before = await displayImage(); await menu('save'); await expect(page.locator('#dirty-dot')).toBeHidden();
   await menu('open'); await expect(page.locator('#document-name')).toHaveText('尺寸');
-  expect(await page.locator('#canvas').evaluate(c => c.toDataURL())).toBe(before);
+  expect(await displayImage()).toBe(before);
   const saved = JSON.parse(await fs.readFile(file, 'utf8')); expect(saved.layers[0].data).toBeTruthy(); expect(saved.layers[1].type).toBe('text'); expect(saved.resolution).toBe(300);
   await menu('canvasSize'); await page.locator('#size-width').fill('9000'); await page.locator('#size-height').fill('9000');
-  await page.locator('#size-form button[type=submit]').click(); await expect(page.locator('#size-error')).toContainText('6400 万');
-  expect(await page.locator('#canvas').evaluate(c => c.width)).toBe(640); await page.locator('#size-dialog [data-dismiss]').click();
+  await page.locator('#size-form button[type=submit]').click();if(!(await page.locator('#size-error').isVisible()))await expect(page.locator('#size-dialog')).toBeHidden(); await expect(page.locator('#size-error')).toContainText('6400 万');
+  expect(await page.locator('#canvas-wrap').evaluate(c => parseInt(c.style.width))).toBe(640); await page.locator('#size-cancel').click();
 });
 
 async function adjustmentValue(key, value) {
@@ -323,12 +323,12 @@ test('选区渐变、向下合并、混合模式合并保持画面、文字栅�
   await expect(page.locator('#layer-count')).toHaveText('2 个图层');
   expect(await pixel(150, 300)).toEqual([255, 0, 0, 255]);
   const center = await pixel(400, 300); expect(center[0]).toBeGreaterThan(120); expect(center[0]).toBeLessThan(140); expect(center[2]).toBe(255);
-  await edit('layer-opacity', 50); const before = await page.locator('#canvas').evaluate(c => c.toDataURL()); await menu('mergeDown');
-  await expect(page.locator('#layer-count')).toHaveText('1 个图层'); expect(await page.locator('#canvas').evaluate(c => c.toDataURL())).toBe(before);
+  await edit('layer-opacity', 50); const before = await displayImage(); await menu('mergeDown');
+  await expect(page.locator('#layer-count')).toHaveText('1 个图层'); expect(await displayImage()).toBe(before);
   await menu('undo'); await expect(page.locator('#layer-count')).toHaveText('2 个图层');
   await page.locator('#blend').selectOption('multiply'); await menu('mergeDown'); await expect(page.locator('#toast')).toContainText('正常混合');
-  const blendBefore = await page.locator('#canvas').evaluate(c => c.toDataURL()); await menu('mergeVisible');
-  await expect(page.locator('#layer-count')).toHaveText('1 个图层'); expect(await page.locator('#canvas').evaluate(c => c.toDataURL())).toBe(blendBefore);
+  const blendBefore = await displayImage(); await menu('mergeVisible');
+  await expect(page.locator('#layer-count')).toHaveText('1 个图层'); expect(await displayImage()).toBe(blendBefore);
   await page.locator('[data-tool=text]').click(); const p = await at(700, 450); await page.mouse.click(p.x, p.y);
   await edit('text-content','中文栅格化');
   await page.locator('#canvas').evaluate(c => { window.testTextPixels = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; }); await menu('rasterize');
@@ -373,14 +373,14 @@ test('蒙版黑白绘画、撤销、浓度、链接移动、保存重开和应�
   await page.locator('.layer-row.active [data-target=image]').click(); await edit('layer-x', 20);
   const file = test.info().outputPath('蒙版.ccomp');
   await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled:false, filePath:target }); },file);
-  await menu('save'); const first = JSON.parse(await fs.readFile(file,'utf8')); expect(first.layers[1].mask.x).toBe(20);
+  await menu('save'); const first = JSON.parse(await fs.readFile(file,'utf8')); expect(first.layers[1].mask.x).toBe(-80);
   await page.locator('.layer-row.active .mask-thumb').click(); await menu('linkMask'); await edit('layer-x', 40);
   await menu('save'); const second = JSON.parse(await fs.readFile(file,'utf8')); expect(second.layers[1].x).toBe(20); expect(second.layers[1].mask.x).toBe(40); expect(second.layers[1].mask.linked).toBe(false);
-  const before = await page.locator('#canvas').evaluate(c => c.toDataURL());
+  const before = await displayImage();
   await app.evaluate(({ dialog }, target) => { dialog.showOpenDialog = async () => ({ canceled:false, filePaths:[target] }); },file);
-  await menu('open'); expect(await page.locator('#canvas').evaluate(c => c.toDataURL())).toBe(before);
+  await menu('open'); expect(await displayImage()).toBe(before);
   await menu('applyMask'); await expect(page.locator('.layer-row.active .mask-thumb')).toHaveCount(0);
-  expect(await page.locator('#canvas').evaluate(c => c.toDataURL())).toBe(before); await menu('undo'); await expect(page.locator('.layer-row.active .mask-thumb')).toHaveCount(1);
+  expect(await displayImage()).toBe(before); await menu('undo'); await expect(page.locator('.layer-row.active .mask-thumb')).toHaveCount(1);
 });
 
 test('同级多选分组、剪贴蒙版、组显示、组透明度、移动与复制独立蒙版', async () => {
@@ -391,7 +391,7 @@ test('同级多选分组、剪贴蒙版、组显示、组透明度、移动与�
   await expect(page.locator('#layer-count')).toHaveText('4 个图层'); expect(await pixel(250,250)).toEqual([0,0,255,255]);
   await page.locator('.layer-row.active button[aria-label="隐藏图层"]').click(); expect((await pixel(250,250))[3]).toBe(0);
   await page.locator('.layer-row.active button[aria-label="显示图层"]').click(); await edit('layer-opacity', 50); expect((await pixel(250,250))[3]).toBeCloseTo(128,-1);
-  await edit('layer-opacity', 100); await page.locator('[data-tool=move]').click(); await drag(250,250,270,280);
+  await edit('layer-opacity', 100); if(await page.locator('#layer-type').textContent()==='形状属性')await menu('rasterize');await page.locator('[data-tool=move]').click(); await drag(250,250,270,280);
   expect((await pixel(110,110))[3]).toBe(0); expect(await pixel(270,280)).toEqual([0,0,255,255]);
   await menu('addMask'); await menu('duplicate'); await expect(page.locator('#layer-count')).toHaveText('7 个图层');
   await menu('invertMask'); await expect(page.locator('.mask-thumb')).toHaveCount(2); // Source group's mask stays white.
@@ -427,17 +427,17 @@ test('不支持的 PSD 明示预览确认，取消保留原项目', async () => 
 test('默认分组选择当前图层，组与蒙版随画布裁剪和重采样保存', async () => {
   await page.locator('#color').fill('#00ff00'); await page.locator('[data-tool=rect]').click(); await drag(100,100,400,400); await menu('addMask');
   await menu('group'); await expect(page.locator('#layer-count')).toHaveText('3 个图层');
-  await menu('canvasSize'); await page.locator('#size-width').fill('1480'); await page.locator('#size-height').fill('1000'); await page.locator('#size-form button[type=submit]').click();
+  await menu('canvasSize'); await page.locator('#size-width').fill('1480'); await page.locator('#size-height').fill('1000'); await page.locator('#size-form button[type=submit]').click();if(!(await page.locator('#size-error').isVisible()))await expect(page.locator('#size-dialog')).toBeHidden();
   expect(await pixel(250,250)).toEqual([0,255,0,255]); expect((await pixel(150,150))[3]).toBe(0);
-  await menu('imageSize'); await page.locator('#size-width').fill('740'); await page.locator('#size-form button[type=submit]').click();
+  await menu('imageSize'); await page.locator('#size-width').fill('740'); await page.locator('#size-form button[type=submit]').click();if(!(await page.locator('#size-error').isVisible()))await expect(page.locator('#size-dialog')).toBeHidden();
   expect(await pixel(125,125)).toEqual([0,255,0,255]);
   const file = test.info().outputPath('尺寸与层级.ccomp'); await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled:false,filePath:target }); },file); await menu('save');
   const saved = JSON.parse(await fs.readFile(file,'utf8')), group = saved.layers.find(l => l.type === 'group'), child = saved.layers.find(l => l.parentId === group.id);
   expect(child.name).toBe('矩形'); expect([group.x,group.y,group.scale,group.rotation]).toEqual([0,0,1,0]); expect([child.mask.x,child.mask.y]).toEqual([50,50]);
   await page.locator('.layer-row.active .disclosure').click(); await expect(page.locator('.layer-row')).toHaveCount(2); await page.locator('.layer-row.active .disclosure').click(); await expect(page.locator('.layer-row')).toHaveCount(3);
-  const before = await page.locator('#canvas').evaluate(c => c.toDataURL()); await app.evaluate(({ dialog }, target) => { dialog.showOpenDialog = async () => ({ canceled:false,filePaths:[target] }); },file);
+  const before = await displayImage(); await app.evaluate(({ dialog }, target) => { dialog.showOpenDialog = async () => ({ canceled:false,filePaths:[target] }); },file);
   await menu('open'); await expect(page.locator('#confirm-dialog')).not.toBeVisible(); await expect(page.locator('#tab-name')).toHaveText('尺寸与层级');
-  expect(await page.locator('#canvas').evaluate(c => c.toDataURL())).toBe(before);
+  expect(await displayImage()).toBe(before);
 });
 
 test('PSD 局部蒙版可以扩展到整个画布并通过白色画笔恢复原隐藏区域', async () => {
@@ -451,9 +451,11 @@ test('PSD 局部蒙版可以扩展到整个画布并通过白色画笔恢复原�
 
 test('移动自动选择按可见像素命中，变换控件开关与菜单键盘操作', async () => {
   await page.locator('#color').fill('#ff0000'); await page.locator('[data-tool=rect]').click(); await drag(100,100,300,300);
-  await page.locator('#color').fill('#0000ff'); await drag(500,100,700,300); await page.locator('[data-tool=move]').click(); await page.locator('#auto-select').check();
+  await page.locator('#color').fill('#0000ff'); await drag(500,100,700,300); if(await page.locator('#layer-type').textContent()==='形状属性')await menu('rasterize');await page.locator('[data-tool=move]').click(); await page.locator('#auto-select').check();
   await drag(150,150,170,180); expect((await pixel(110,110))[3]).toBe(0); expect(await pixel(170,180)).toEqual([255,0,0,255]);
   await page.locator('#show-transform').uncheck(); expect(await page.locator('#overlay').evaluate(c => c.getContext('2d').getImageData(0,0,c.width,c.height).data.some(v=>v!==0))).toBe(false);
   await page.getByRole('button',{name:'编辑(E)',exact:true}).click(); await expect(page.getByRole('menuitem',{name:'后退一步 Ctrl+Z',exact:true})).toBeFocused(); await page.keyboard.press('Enter');
   await expect.poll(async()=> (await pixel(110,110))[3]).toBe(255); await expect(page.locator('.app-menu')).toHaveCount(0);
 });
+
+async function displayImage(){await page.waitForFunction(()=>document.querySelector('#canvas').dataset.quality==='native');return page.locator('#canvas').evaluate(c=>c.toDataURL());}

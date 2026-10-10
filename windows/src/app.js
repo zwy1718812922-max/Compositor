@@ -1,3 +1,10 @@
+import {shapeKinds,shapeSettings,paintShape} from './shape-model.mjs';
+import {setupShapes} from './shapes.js';
+import {setupArtboards} from './artboards.js';
+import {setupProperties} from './properties.js';
+import {setupColorPicker} from './color-picker.js';
+import {setupToolGroups} from './tool-groups.js';
+import {setupImageSize} from './image-size.js';
 import { affine, inverse } from './affine.mjs';
 import { setupColors, rememberColor, lastTextColor } from './colors.js';
 import { setupViewMotion } from './view-motion.js';
@@ -14,7 +21,7 @@ import { setupCutout } from './cutout.js';
 import { setupRulers } from './rulers.js';
 import { setupFillEditor } from './fill-editor.js';
 import { setupFonts } from './fonts.js';
-import { hitLayer, invalidatePixels, rasterLayer, textLayer, canvas, bounds, layerTransform, localPoint, renderInto, composite, serialize, deserialize, decodeImage, History, MAX_PIXELS } from './editor.js';
+import { transformPoint, baseLayer, groupLayer, hitLayer, invalidatePixels, rasterLayer, textLayer, canvas, bounds, layerTransform, localPoint, renderInto, composite, serialize, deserialize, decodeImage, History, MAX_PIXELS } from './editor.js';
 import { preparePsd } from './psd-export.js';
 import { renderPreview } from './render-preview.js';
 import { advancedCommand, pixelCount, grayColor, moveLayer, transformLayer, expandMask } from './advanced.js';
@@ -26,7 +33,7 @@ import { setupTransformControls } from './transform-controls.js';
 import { setupTypeEditor, clearTextCache } from './type-editor.js';
 import { setupLayerStyles } from './layer-styles.js';
 import { hasEffects } from './effect-model.mjs';
-import { rectangle, clipSelection, checkSize, resizeCanvasProject, cropProject, resizeImageProject, rasterize, adjustRaster } from './operations.js';
+import { expandRasterRect, rectangle, clipSelection, checkSize, resizeCanvasProject, cropProject, resizeImageProject, rasterize, adjustRaster } from './operations.js';
 const $ = id => document.getElementById(id);
 const api = window.desktop;
 let project, name = '未命名', dirty = false, tool = 'move', busy = false, space = false, gesture = null;
@@ -34,7 +41,8 @@ let zoom = 1, pan = { x: 0, y: 0 }, toastTimer;
 let selection = null, cropRect = null, sizeMode = 'image', adjustment = null, adjustmentFrame = null;
 let history = new History(),workspace,path=null,sourcePath=null;
 let editTarget = 'image'; const selectedIds = new Set();
-let savedColors = null, selectionAnchor=null,viewMotion,layerMenu,panels;
+let propertiesUI,shapes,artboardUI,imageSize,colorTransaction=null;
+let savedColors = null, selectionAnchor=null,viewMotion,layerMenu,panels,toolGroups;
 let typeEditor, transformUI, snapping, fonts, brushCursor, rulers,selections, numericTransaction=null, documentOpen=true, transformSelected=true;
 const editSurface = () => editTarget === 'mask' && active().mask ? active().mask : active();
 function setTarget(target) {
@@ -55,7 +63,7 @@ function selectLayer(layer, target = 'image', multiple = false, range = false) {
   project.activeId = selectedIds.has(layer.id) ? layer.id : [...selectedIds].at(-1); setTarget(target); refresh(false); drawOverlay();
 }
 const viewport = $('viewport'), display = $('canvas'), overlay = $('overlay'),recentPreview=canvas(1,1);
-const toolNames = { move: '移动工具', select: '矩形选区工具',objectSelect:'对象选择工具',quickSelect:'快速选择工具',wand:'魔棒工具', crop: '裁剪工具', gradient: '渐变工具', brush: '画笔工具', eraser: '橡皮擦工具', text: '文字工具', rect: '矩形工具', ellipse: '椭圆工具', eyedropper: '吸管工具', hand: '抓手工具' };
+const toolNames = { move: '移动工具', select: '矩形选区工具',objectSelect:'对象选择工具',quickSelect:'快速选择工具',wand:'魔棒工具', crop: '裁剪工具', gradient: '渐变工具', brush: '画笔工具', eraser: '橡皮擦工具', text: '文字工具', artboard:'画板工具',triangle:'三角形工具',polygon:'多边形工具',line:'直线工具', rect: '矩形工具', ellipse: '椭圆工具', eyedropper: '吸管工具', hand: '抓手工具' };
 const active = () => project.layers.find(layer => layer.id === project.activeId);
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 function setBusy(value) {
@@ -77,7 +85,7 @@ function updateTitle() {
 function snapshot() {
   return serialize(project,true);
 }
-function checkpoint() { if(numericTransaction){if(!numericTransaction.pushed){history.push(numericTransaction.before);numericTransaction.pushed=true;}return;} history.push(snapshot()); }
+function checkpoint() { if(colorTransaction){if(!colorTransaction.pushed){history.push(colorTransaction.before);colorTransaction.pushed=true;}return;} if(numericTransaction){if(!numericTransaction.pushed){history.push(numericTransaction.before);numericTransaction.pushed=true;}return;} history.push(snapshot()); }
 function changed(message) {
   if (!selectedIds.has(project.activeId)) { selectedIds.clear(); selectedIds.add(project.activeId); }
   setDirty(true); render(); refresh(); if (message) $('status').textContent = message;
@@ -86,10 +94,10 @@ function capacity(width = 0, height = 0, count = 1) {
   const pixels = project.layers.reduce((sum, l) => sum + pixelCount(l), 0);
   if (project.layers.length + count > 100 || pixels + width * height > MAX_PIXELS) throw new Error('已达到图层内存限制（100 层 / 6400 万像素），请删除一些图层。');
 }
-function newProject(width, height, background, title, resolution = 72, register=true,colorMode='RGB',profile) {
+function newProject(width, height, background, title, resolution = 72, register=true,colorMode='RGB',profile,artboard=false) {
   if(register)workspace?.beginNew();
   documentOpen=true;document.body.classList.remove('no-document');
-  const layer = rasterLayer('背景', width, height, background);
+  const layer=artboard?{...groupLayer('画板 1'),artboard:{width,height,background}}:register?{...baseLayer('纯色背景','fill'),width,height,fill:{kind:'solid',color:background==='transparent'?'#ffffff':background,color2:'#ffffff',angle:0,scale:100,pattern:'checker',alpha:background==='transparent'?0:1},fillOpacity:1}:rasterLayer('背景',width,height,background);
   project = { width, height, resolution, colorSpace: 'sRGB',colorMode,...(profile?{colorProfile:profile}:{}), layers: [layer], activeId: layer.id };
   selection = cropRect = null; selectedIds.clear(); selectedIds.add(layer.id); setTarget('image');
   name = title || '未命名'; history=new History();path=sourcePath=null;transformSelected=true;api.commitDocument({kind:'activate',path:null});
@@ -103,7 +111,7 @@ function resizeCanvas() {
   $('dimensions').textContent = project.width + ' × ' + project.height + ' px · ' + Math.round(project.resolution) + ' ppi · '+(project.colorMode||'RGB');
   $('tab-size').textContent = project.width + ' × ' + project.height;
 }
-function decorateView() {drawRulers(project,zoom,pan);rulers?.update();brushCursor?.update();drawOverlay();typeEditor?.update();}
+function decorateView() {drawRulers(project,zoom,pan);rulers?.update();brushCursor?.update();drawOverlay();typeEditor?.update();artboardUI?.update();shapes?.update();}
 function applyView(interactive=false) {
   $('canvas-wrap').style.transform = 'translate(' + pan.x + 'px,' + pan.y + 'px) scale(' + zoom + ')';
   $('zoom-value').textContent = Math.round(zoom * 100) + '%';
@@ -119,11 +127,11 @@ function setZoom(value, center = { x: viewport.clientWidth / 2, y: viewport.clie
   pan = { x: center.x - (center.x - pan.x) * factor, y: center.y - (center.y - pan.y) * factor };
   zoom = next; applyView(interactive);
 }
-function render() { if(!documentOpen||workspace?.isHome())return;rulers?.update();const region=renderPreview(display,project,undefined,true,{scale:zoom,pixelRatio:devicePixelRatio,pan,width:viewport.clientWidth,height:viewport.clientHeight,editingId:typeEditor?.editing?active().id:undefined});viewMotion?.rendered(project,region);drawOverlay();typeEditor?.update(); }
+function render(override) { const renderProject=override||project;if(!documentOpen||workspace?.isHome())return;rulers?.update();const region=renderPreview(display,renderProject,undefined,true,{scale:zoom,pixelRatio:devicePixelRatio,pan,width:viewport.clientWidth,height:viewport.clientHeight,editingId:typeEditor?.editing?active().id:undefined});viewMotion?.rendered(project,region,override);drawOverlay();typeEditor?.update(); }
 function drawOverlay() {
   const ctx = overlay.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,overlay.width,overlay.height);ctx.scale(overlay.width/project.width,overlay.height/project.height);
   const layer = active();
-  transformUI?.update();
+  transformUI?.update();shapes?.update();artboardUI?.update();
   if (gesture?.kind !== 'move') snapping?.clear();
   const rect = cropRect || selection;
   if (rect) {
@@ -137,15 +145,16 @@ function drawOverlay() {
   $('selection-size').textContent = rect ? rect.width + ' × ' + rect.height : '';
 }
 function setTool(next) {
+  if(next==='artboard'){const current=active(),board=current?.artboard?current:current&&ancestors(project,current).find(l=>l.artboard);if(board)selectLayer(board);}
   if(['move','text'].includes(next))transformSelected=true;
   if (next !== tool && typeEditor?.editing) typeEditor.finish();
   if (next !== 'crop') cropRect = null;
-  tool = next;brushCursor?.update(); $('tool-name').textContent = toolNames[tool];
+  tool = next;toolGroups?.update(next);brushCursor?.update(); $('tool-name').textContent = toolNames[tool];
   selections?.update(tool);
   $('move-options').hidden = tool !== 'move'; $('text-options').hidden = tool !== 'text';
   $('type-options').hidden = tool !== 'text';
   if (tool === 'text' && active().type !== 'text') $('type-color').value = lastTextColor();
-  const paint = ['brush', 'eraser', 'rect', 'ellipse', 'gradient'].includes(tool);
+  const paint = ['brush', 'eraser', ...shapeKinds, 'gradient'].includes(tool);
   $('tool-color-label').hidden = !paint; $('brush-size').closest('label').hidden = !['brush', 'eraser'].includes(tool);
   $('brush-hardness').closest('label').hidden = !['brush', 'eraser'].includes(tool); $('brush-opacity').closest('label').hidden = !paint;
   $('gradient-color-option').hidden = tool !== 'gradient';
@@ -196,7 +205,7 @@ function refresh(rebuild = true) {
   if (['group','adjustment'].includes(layer.type) && editTarget !== 'mask') ['layer-x', 'layer-y', 'layer-scale', 'layer-scale-y','layer-rotation'].forEach(id => $(id).disabled = true);
   if (layer.type === 'text') { if (![...$('font').options].some(o => o.value === layer.font)) $('font').add(new Option(layer.font,layer.font)); $('font').value = layer.font; $('font-size').value = layer.fontSize; $('text-color').value = layer.color; $('bold').classList.toggle('active', layer.bold); $('text-leading').value = layer.lineHeight || 1.35; $('text-spacing').value = layer.letterSpacing || 0; }
   fonts?.update(); if(layer.type==='text'){ $('font-style').value=`${layer.bold?700:layer.fontWeight||400}:${!!layer.italic}`;$('italic').classList.toggle('active',!!layer.italic);$('underline').classList.toggle('active',!!layer.underline);document.querySelectorAll('[data-align]').forEach(b=>b.classList.toggle('active',b.dataset.align===(layer.align||'left')));}
-  typeEditor?.update();
+  typeEditor?.update();propertiesUI?.update();shapes?.update();artboardUI?.update();
   $('mask-empty').hidden = !!layer.mask; $('mask-controls').hidden = !layer.mask;
   $('mask-state').textContent = layer.mask ? (layer.mask.enabled ? '已启用' : '已停用') : '未添加';
   if (layer.mask) { $('mask-density').value = layer.mask.density * 100; $('mask-density-value').textContent = Math.round(layer.mask.density * 100) + '%'; $('mask-feather').value = layer.mask.feather; $('mask-toggle').textContent = layer.mask.enabled ? '停用' : '启用'; $('mask-link').textContent = layer.mask.linked ? '取消链接' : '链接'; $('mask-density').disabled = $('mask-feather').disabled = locked; }
@@ -259,16 +268,17 @@ async function importImages(images) {
   const incoming = []; let pixels = 0;
   for (const image of images) {
     const decoded = await decodeImage(image.data);
-    const ratio = Math.min(1, project.width / decoded.width, project.height / decoded.height);
+    const current=active(),board=current.artboard?current:ancestors(project,current).find(l=>l.artboard),area=board?{x:board.x,y:board.y,...board.artboard}:{x:0,y:0,width:project.width,height:project.height};
+    const ratio = Math.min(1, area.width / decoded.width, area.height / decoded.height);
     const width = Math.max(1, Math.round(decoded.width * ratio)), height = Math.max(1, Math.round(decoded.height * ratio));
     pixels += width * height;
     capacity(pixels, 1, images.length);
     const layer = rasterLayer(image.name.slice(0, 200), width, height);
     layer.canvas.getContext('2d').drawImage(decoded, 0, 0, width, height);
-    layer.x = Math.round((project.width - width) / 2); layer.y = Math.round((project.height - height) / 2);
+    layer.x=area.x+Math.round((area.width-width)/2);layer.y=area.y+Math.round((area.height-height)/2);layer.parentId=current.type==='group'?current.id:current.parentId||board?.id||null;
     incoming.push(layer);
   }
-  checkpoint(); project.layers.push(...incoming); project.activeId = incoming.at(-1).id;
+  checkpoint(); project.layers.push(...incoming);canonicalize(project); project.activeId = incoming.at(-1).id;
   $('canvas-tip').hidden = true; setTool('move'); changed('已导入 ' + incoming.length + ' 张图片');
 }
 async function travel(undo) {
@@ -293,7 +303,7 @@ function replacementCapacity(removed, width, height) {
   const pixels = project.layers.filter(l => !removed.includes(l)).reduce((n, l) => n + pixelCount(l), width * height);
   if (pixels > MAX_PIXELS) throw new Error('操作后像素图层合计超过 6400 万像素，请先删除部分图层。');
 }
-function openSize(mode) {
+function openSize(mode) { if(imageSize)return imageSize.open(mode);
   sizeMode = mode;
   $('size-title').textContent = mode === 'image' ? '图像大小' : '画布大小';
   $('size-description').textContent = mode === 'image' ? '按比例重采样所有像素图层，文字保持可编辑。单独修改分辨率不会改变像素尺寸。' : '根据锚点扩展或裁切画布，图层内容保留，新增区域透明。';
@@ -350,7 +360,7 @@ async function command(action,file=null) {
     if(action==='duplicate'&&selection){const layer=copySelectionLayer(project,active(),selection);capacity(layer.canvas.width,layer.canvas.height);checkpoint();project.layers.splice(project.layers.indexOf(active())+1,0,layer);canonicalize(project);project.activeId=layer.id;selectedIds.clear();selectedIds.add(layer.id);selection=null;setTarget('image');changed('已将选区内的内容复制为新图层');return;}
     if(action==='editText'){if(active().type==='text')typeEditor.begin(active());return;}
     if(action==='resetPanels'){panels.reset();return;}
-    if (advancedCommand(action, { project, checkpoint, changed, toast, capacity, selected: selectedIds, target: editTarget, setTarget, selection })) return;
+    const hadBoards=project.layers.some(l=>l.artboard);if(advancedCommand(action,{project,checkpoint,changed,toast,capacity,selected:selectedIds,target:editTarget,setTarget,selection})){if(hadBoards&&['deleteLayer','duplicate'].includes(action)){artboardUI.normalize();resizeCanvas();refresh();render();}return;}
     if (action.startsWith('panel')) { panels.show(action.slice(5).toLowerCase()); return; }
     if (action === 'toggleSnap') { snapping.toggle(); return; }
     if(rulers?.command(action))return;
@@ -368,10 +378,10 @@ async function command(action,file=null) {
       if(opened.project.colorMode==='CMYK')await initColorProfile(opened.project.colorProfile.data);
       const loaded = await deserialize(opened.project);workspace.beginNew();documentOpen=true;document.body.classList.remove('no-document');project = loaded; name = opened.name; selection = cropRect = null;path=opened.source==='psd'?null:opened.path;sourcePath=opened.path;history=new History();transformSelected=true;
       selectedIds.clear(); selectedIds.add(project.activeId); setTarget('image');
-      api.commitDocument({kind:'activate',path});resizeCanvas();dirty=opened.source==='psd';fit();refresh();workspace.add();setDirty(dirty);workspace.remember(opened.path);$('canvas-tip').hidden = true;toast(opened.source === 'psd' ? 'PSD 已打开' + (opened.warnings.length ? '：' + opened.warnings.join('；') : '') : '项目已打开');
+      api.commitDocument({kind:'activate',path});resizeCanvas();dirty=opened.source==='psd';fit();refresh();workspace.add();setDirty(dirty);await viewMotion.prepare(project);viewMotion.draw();workspace.remember(opened.path);$('canvas-tip').hidden = true;toast(opened.source === 'psd' ? 'PSD 已打开' + (opened.warnings.length ? '：' + opened.warnings.join('；') : '') : '项目已打开');
     } else if (action === 'save' || action === 'saveAs') await save(action === 'saveAs');
     else if (action === 'import') await importImages(await result(api.importImages()));
-    else if (action === 'export') $('export-dialog').showModal();
+    else if (action === 'export') {const boards=project.layers.filter(l=>l.artboard);$('export-scope-label').hidden=!boards.length;$('export-artboard').replaceChildren(...boards.map(l=>new Option(l.name,l.id)));const owner=active().artboard?active():ancestors(project,active()).find(l=>l.artboard);if(owner)$('export-artboard').value=owner.id;$('export-dialog').showModal();}
     else if (action === 'help') $('help-dialog').showModal();
     else if (action === 'imageSize' || action === 'canvasSize') openSize(action === 'imageSize' ? 'image' : 'canvas');
     else if(action==='removeBackground'||action==='selectSubject')cutout.open({mode:action==='selectSubject'?'selection':'mask'});
@@ -387,14 +397,14 @@ async function command(action,file=null) {
       replaceSize(cropProject(project, rect), '已裁剪画布，画布外的图层像素保留');
     } else if (action === 'fillSelection' || action === 'clearSelection') {
       if (!pixelEditable()) return;
-      checkpoint(); if (editTarget === 'mask') expandMask(project, active(), capacity);
+      checkpoint(); if (editTarget === 'mask') expandMask(project, active(), capacity);else if(action==='fillSelection')expandRasterRect(active(),selection||{x:0,y:0,width:project.width,height:project.height},capacity);
       const layer = editSurface(), ctx = layer.canvas.getContext('2d'); ctx.save(); clipSelection(ctx, layer, selection);
       if (action === 'clearSelection' && editTarget !== 'mask') ctx.clearRect(0, 0, layer.canvas.width, layer.canvas.height);
       else { ctx.globalAlpha = Number($('brush-opacity').value) / 100; ctx.fillStyle = editTarget === 'mask' ? action === 'clearSelection' ? '#000000' : grayColor($('color').value) : $('color').value; ctx.fillRect(0, 0, layer.canvas.width, layer.canvas.height); }
       ctx.restore(); invalidatePixels(layer); changed(action === 'clearSelection' ? '已清除像素' : '已使用前景色填充');
     } else if (action === 'mergeDown' || action === 'mergeVisible') await mergeLayers(action === 'mergeVisible');
     else if (action === 'rasterize') {
-      if (!editable() || !['text','fill'].includes(active().type)) return;
+      if (!editable() || !['text','fill','shape'].includes(active().type)) return;
       const old = active(), next = rasterize(old); replacementCapacity([old], next.canvas.width, next.canvas.height);
       checkpoint(); project.layers[project.layers.indexOf(old)] = next; changed('文字已栅格化，撤销可恢复可编辑文字');
     } else if (action === 'copyMerged') {
@@ -412,7 +422,7 @@ async function command(action,file=null) {
     else if (action === 'addLayer') {
       capacity(project.width, project.height); checkpoint();
       const layer = rasterLayer('图层 ' + (project.layers.length + 1), project.width, project.height);
-      layer.parentId = active().type === 'group' ? active().id : active().parentId || null; project.layers.push(layer); canonicalize(project); project.activeId = layer.id; setTarget('image'); changed('已新建透明图层');
+      layer.parentId=active().type==='group'?active().id:active().parentId||null;project.layers.push(layer);canonicalize(project);project.activeId=layer.id;setTarget('image');changed('已新建透明图层');
     }
   } catch (error) { toast(error.message || '操作失败，请重试。'); }
   finally { setBusy(false);if(action==='editText'&&typeEditor.editing)$('inline-text').focus(); }
@@ -427,7 +437,7 @@ $('new-color-mode').addEventListener('change',()=>{newProfile=undefined;});
 const newDocument = setupNewDocument(async settings => {
   let profile;
   if(settings.colorMode==='CMYK'){const data=newProfile||await result(api.colorProfile('system'));const p=await initColorProfile(data);profile={name:p.name,data};}
-  newProject(settings.width, settings.height, settings.background, settings.title, settings.resolution,true,settings.colorMode,profile);
+  newProject(settings.width, settings.height, settings.background, settings.title, settings.resolution,true,settings.colorMode,profile,settings.artboard);
   $('canvas-tip').hidden = false;
 });
 $('new-profile-import').onclick=async()=>{try{const data=await result(api.colorProfile('custom'));if(data){const profile=await initColorProfile(data);newProfile=data;$('new-color-profile').replaceChildren(new Option(profile.name,profile.name));}}catch(e){toast(e.message);}};
@@ -466,10 +476,11 @@ $('export-form').onsubmit = async event => {
   event.preventDefault(); if (busy) return; setBusy(true);
   try {
     const format = $('export-format').value;
-    let saved;
-    if (format === 'psd') saved = await result(api.exportPsd(preparePsd(project)));
-    else { const output = composite(project, format === 'jpeg' ? '#ffffff' : null); const data = output.toDataURL('image/' + format, Number($('export-quality').value) / 100); saved = await result(api.exportImage(data, format, project.resolution)); }
-    if (saved) { $('export-dialog').close(); toast('图片已导出：' + saved); }
+    let saved;const scope=$('export-scope-label').hidden?'document':$('export-scope').value,boards=project.layers.filter(l=>l.artboard),selected=boards.find(l=>l.id===$('export-artboard').value),outputProject=scope==='current'&&selected?artboardUI.exportProject(selected):project;
+    if(scope==='all'&&format!=='psd'){const items=[];for(const board of boards){const p=artboardUI.exportProject(board),output=composite(p,format==='jpeg'?'#ffffff':null);items.push({name:board.name,data:output.toDataURL('image/'+format,Number($('export-quality').value)/100)});await new Promise(r=>setTimeout(r,0));}saved=await result(api.exportArtboards(items,format,project.resolution));}
+    else if (format === 'psd') saved = await result(api.exportPsd(preparePsd(outputProject)));
+    else { const output = composite(outputProject, format === 'jpeg' ? '#ffffff' : null); const data = output.toDataURL('image/' + format, Number($('export-quality').value) / 100); saved = await result(api.exportImage(data, format, project.resolution)); }
+    if (saved) { $('export-dialog').close(); toast(Array.isArray(saved)?'已导出 '+saved.length+' 个画板':'图片已导出：'+saved); }
   } catch (error) { toast(error.message); }
   finally { setBusy(false); }
 };
@@ -478,9 +489,9 @@ function updateProperty(id, key, convert = x => x) {
     if (!documentOpen || isLocked(project, active()) || busy) { refresh(); return; }
     const value = convert($(id).value);
     const geometry = ['x', 'y', 'scale','scaleY', 'rotation'].includes(key), target = geometry ? editSurface() : active();
-    if (geometry && active().type === 'group' && editTarget !== 'mask') { refresh(); return; }
+    if (geometry && active().type === 'group' && !active().artboard && editTarget !== 'mask') { refresh(); return; }
     if (value === undefined || value === target[key]) { refresh(); return; }
-    try { if (!typeEditor.owns(target)) checkpoint(); if(key==='font')delete target.psdFont; if (target.type === 'text' && ['font','fontSize','color','lineHeight','letterSpacing'].includes(key)) clearTextCache(target); if (target === active() && geometry) transformLayer(target, { [key]: value }); else { target[key] = value; if (target === active().mask) invalidatePixels(target); } changed(); }
+    try { if (!typeEditor.owns(target)) checkpoint(); if(key==='font')delete target.psdFont; if (target.type === 'text' && ['font','fontSize','color','lineHeight','letterSpacing'].includes(key)) clearTextCache(target); if(target.artboard&&geometry){if(['x','y'].includes(key))artboardUI.position(target,{[key]:value});}else if (target === active() && geometry) transformLayer(target, { [key]: value }); else { target[key] = value; if (target === active().mask) invalidatePixels(target); } changed(); }
     catch (error) { refresh(); toast(error.message); }
   });
 }
@@ -499,9 +510,10 @@ $('bold').onclick = () => { if (active().type !== 'text' || isLocked(project, ac
 $('brush-opacity').oninput = () => $('brush-opacity-value').textContent = $('brush-opacity').value + '%';
 $('zoom-in').onclick = () => setZoom(zoom * 1.25); $('zoom-out').onclick = () => setZoom(zoom / 1.25);
 viewport.addEventListener('wheel', event => {
-  event.preventDefault(); if (gesture) return;
-  const rect = viewport.getBoundingClientRect();
-  setZoom(zoom * Math.exp(-event.deltaY * .0015), { x: event.clientX - rect.left, y: event.clientY - rect.top },true);
+  if(!documentOpen||workspace?.isHome()||busy)return;event.preventDefault();if(gesture)return;
+  const factor=event.deltaMode===1?16:event.deltaMode===2?viewport.clientHeight:1,dx=event.deltaX*factor,dy=event.deltaY*factor;
+  if(event.altKey){const rect=viewport.getBoundingClientRect();setZoom(zoom*Math.exp(-dy*.0015),{x:event.clientX-rect.left,y:event.clientY-rect.top},true);}
+  else{pan={x:pan.x-(event.shiftKey?dy:dx),y:pan.y-(event.shiftKey?dx:dy)};applyView(true);}
 }, { passive: false });
 function point(event) {
   const rect = viewport.getBoundingClientRect();
@@ -525,7 +537,9 @@ viewport.addEventListener('pointerdown', event => {
   if (typeEditor.editing) typeEditor.finish();
   viewport.focus(); const p = point(event);
   if (tool === 'hand' || space || event.button === 1) {
+    viewport.style.cursor='grabbing';brushCursor?.update();
     gesture = { kind: 'pan', startX: event.clientX, startY: event.clientY, pan: { ...pan } };
+  } else if(tool==='artboard'){const board=artboardUI.at(p);if(board){if(isLocked(project,board)||descendants(project,board.id).some(l=>isLocked(project,l))){toast('请先解锁画板及内容。');return;}selectLayer(board);gesture={kind:'artboardTransform',key:'move',layer:board,start:p,original:{x:board.x,y:board.y,...board.artboard},originals:[board,...descendants(project,board.id)].map(layer=>({layer,x:layer.x,y:layer.y,mask:layer.mask&&{x:layer.mask.x,y:layer.mask.y}})),before:snapshot(),dirty,redo:[...history.redoStack],committed:false};}else gesture={kind:'artboardCreate',start:p,end:p};
   } else {
     if (p.x < 0 || p.y < 0 || p.x >= project.width || p.y >= project.height) {transformSelected=false;drawOverlay();return;}
     transformSelected=true;
@@ -548,8 +562,8 @@ viewport.addEventListener('pointerdown', event => {
     else if(['quickSelect','wand'].includes(tool)){gesture=selections.begin(p,event,tool);if(tool==='wand'&&gesture){const g=gesture;gesture=null;selections.finish(g);return;}}
     else if (tool === 'select' || tool === 'crop'||tool==='objectSelect') {
       gesture = { kind: tool, start: p, end: p,oldSelection:selection,mode:selections.mode(event) };
-    } else if (['rect', 'ellipse', 'gradient'].includes(tool)) {
-      try { if (editTarget !== 'mask') capacity(project.width, project.height); else if (!pixelEditable()) return; } catch (error) { toast(error.message); return; }
+    } else if ([...shapeKinds, 'gradient'].includes(tool)) {
+      try { if (editTarget !== 'mask') capacity(tool==='gradient'?project.width:0,tool==='gradient'?project.height:0); else if (!pixelEditable()) return; } catch (error) { toast(error.message); return; }
       gesture = { kind: tool, start: p, end: p, color: editTarget === 'mask' ? grayColor($('color').value) : $('color').value, endColor: editTarget === 'mask' ? grayColor($('gradient-color').value) : $('gradient-color').value, mask: editTarget === 'mask', opacity: Number($('brush-opacity').value) / 100 };
     } else {
       if (!editable()) return;
@@ -565,15 +579,13 @@ viewport.addEventListener('pointerdown', event => {
       }
     }
   }
-  if (gesture) { viewport.setPointerCapture(event.pointerId); $('canvas-tip').hidden = true; }
+  if (gesture) { viewport.setPointerCapture(event.pointerId); $('canvas-tip').hidden = true;if(gesture.kind==='move')drawOverlay(); }
 });
 function shapePath(ctx, g) {
   const x = Math.min(g.start.x, g.end.x), y = Math.min(g.start.y, g.end.y);
   const w = Math.abs(g.start.x - g.end.x), h = Math.abs(g.start.y - g.end.y);
   ctx.beginPath();
-  if (g.kind === 'rect') ctx.rect(x, y, w, h);
-  else ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-  ctx.fillStyle = g.color; ctx.globalAlpha = g.opacity; ctx.fill(); ctx.globalAlpha = 1;
+ctx.save();ctx.translate(x,y);ctx.globalAlpha=g.opacity;paintShape(ctx,shapeSettings(g.kind,w||1,h||1,g.color));ctx.restore();
 }
 function gradientPath(ctx, g) {
   const gradient = ctx.createLinearGradient(g.start.x, g.start.y, g.end.x, g.end.y);
@@ -584,6 +596,9 @@ viewport.addEventListener('pointermove', event => {
   if (!gesture) return;
   const g = gesture, p = point(event);
   if (g.kind === 'pan') { pan = { x: g.pan.x + event.clientX - g.startX, y: g.pan.y + event.clientY - g.startY }; applyView(true); }
+  else if(g.kind==='shapeRadius')shapes.move(g,p);
+  else if(g.kind==='artboardTransform')artboardUI.move(g,p);
+  else if(g.kind==='artboardCreate'){g.end=p;drawOverlay();artboardUI.preview(rectangle(g.start,g.end));}
   else if (g.kind === 'transform') { try { transformUI.move(g,p,event.shiftKey); } catch (error) { toast(error.message); } }
   else if(g.kind==='pixelSelect')selections.move(g,p);
   else if (g.kind === 'move') {
@@ -591,7 +606,7 @@ viewport.addEventListener('pointermove', event => {
   } else if (['brush', 'eraser'].includes(g.kind)) paintStroke(g, p);
   else {
     g.end = { x: clamp(p.x, 0, project.width), y: clamp(p.y, 0, project.height) };
-    if (g.kind === 'textCreate') { drawOverlay(); const rect = rectangle(g.start,g.end), ctx = overlay.getContext('2d'); ctx.strokeStyle = '#6eacff'; ctx.lineWidth = 1/zoom; ctx.strokeRect(rect.x,rect.y,rect.width,rect.height); }
+  if (g.kind === 'textCreate') { drawOverlay(); const rect = rectangle(g.start,g.end), ctx = overlay.getContext('2d'); ctx.strokeStyle = '#6eacff'; ctx.lineWidth = 1/zoom; ctx.strokeRect(rect.x,rect.y,rect.width,rect.height); }
     else if (g.kind === 'select' || g.kind === 'crop'||g.kind==='objectSelect') {
       const rect = rectangle(g.start, g.end);
       if (g.kind === 'crop') cropRect = rect; else { selection = rect; cropRect = null; }
@@ -607,6 +622,12 @@ function finishGesture(event) {
   if (!gesture) return;
   const g = gesture; gesture = null;
   if (event && viewport.hasPointerCapture(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
+if(g.kind==='shapeRadius'){shapes.finish(g,event?.type==='pointercancel');return;}
+  if(g.kind==='artboardTransform'){artboardUI.finish(g,event?.type==='pointercancel');return;}
+  if(g.kind==='artboardCreate'){const r=rectangle(g.start,g.end);if(event?.type!=='pointercancel'&&r.width>1&&r.height>1)try{artboardUI.add(r);}catch(e){toast(e.message);}drawOverlay();return;}
+  if(shapeKinds.includes(g.kind)&&!g.mask){if(event?.type!=='pointercancel'&&Math.hypot(g.end.x-g.start.x,g.end.y-g.start.y)>1)shapes.create(g);else drawOverlay();return;}
+  if(g.kind==='move'&&g.committed&&g.originals.some(i=>i.layer.artboard)&&event?.type!=='pointercancel')try{artboardUI.normalize();}catch(e){snapping.cancel(g);toast(e.message);return;}
+  if(g.kind==='move'&&g.committed&&!g.maskOnly&&event?.type!=='pointercancel')for(const l of project.layers.filter(l=>selectedIds.has(l.id)&&!ancestors(project,l).some(a=>selectedIds.has(a.id))))try{artboardUI.adopt(l,point(event));}catch(e){toast(e.message);}
   if (g.kind === 'textCreate') { const rect = rectangle(g.start,g.end), paragraph = rect.width*zoom>5 && rect.height*zoom>5; try { typeEditor.create(paragraph ? rect : {...rect,x:g.start.x,y:g.start.y},paragraph); $('canvas-tip').hidden = true; } catch (error) { toast(error.message); } }
   else if(g.kind==='pixelSelect')selections.finish(g);
   else if(g.kind==='objectSelect'){selection=g.oldSelection;const rect=rectangle(g.start,g.end);if(rect.width>1&&rect.height>1){const found=hitLayer(project,{x:rect.x+rect.width/2,y:rect.y+rect.height/2});if(found?.type==='raster')selectLayer(found);const l=active(),points=[[rect.x,rect.y],[rect.x+rect.width,rect.y],[rect.x,rect.y+rect.height],[rect.x+rect.width,rect.y+rect.height]].map(([x,y])=>localPoint(l,{x,y})),x=Math.max(0,Math.floor(Math.min(...points.map(p=>p.x)))),y=Math.max(0,Math.floor(Math.min(...points.map(p=>p.y))));if(l.canvas)cutout.open({mode:'selection',selectionMode:g.mode,region:{x,y,width:Math.min(l.canvas.width-x,Math.ceil(Math.max(...points.map(p=>p.x)))-x),height:Math.min(l.canvas.height-y,Math.ceil(Math.max(...points.map(p=>p.y)))-y)},autoRun:true});}drawOverlay();}
@@ -616,28 +637,29 @@ function finishGesture(event) {
     if (g.kind === 'crop') cropRect = rect.width && rect.height ? rect : null;
     else { selection = rect.width && rect.height ? rect : null; cropRect = null; }
     drawOverlay(); $('status').textContent = g.kind === 'crop' ? 'Enter 或上方“裁剪”应用，Esc 取消' : '选区已建立，绘画、填充和调整将限制在选区内';
-  } else if (['rect', 'ellipse', 'gradient'].includes(g.kind)) {
+  } else if ([...shapeKinds, 'gradient'].includes(g.kind)) {
     if (g.kind === 'gradient' ? Math.hypot(g.start.x - g.end.x, g.start.y - g.end.y) >= 1 : Math.abs(g.start.x - g.end.x) >= 1 && Math.abs(g.start.y - g.end.y) >= 1) {
       checkpoint(); try { if (g.mask) expandMask(project, active(), capacity); } catch (error) { toast(error.message); return; }
       const layer = g.mask ? editSurface() : rasterLayer({ rect: '矩形', ellipse: '椭圆', gradient: '渐变' }[g.kind], project.width, project.height);
       const ctx = layer.canvas.getContext('2d'); ctx.save(); clipSelection(ctx, layer, selection);
       if (g.mask) { const origin = localPoint(layer, { x: 0, y: 0 }); ctx.transform(...inverse(affine(layer)), origin.x, origin.y); }
       if (g.kind === 'gradient') gradientPath(ctx, g); else shapePath(ctx, g); ctx.restore();
-      if (!g.mask) { layer.parentId = active().type === 'group' ? active().id : active().parentId || null; project.layers.push(layer); canonicalize(project); project.activeId = layer.id; setTarget('image'); } else invalidatePixels(layer); changed(g.mask ? '已更新蒙版' : '已创建' + layer.name + '图层');
+      if (!g.mask) {layer.parentId=artboardUI.parentAt(g.start); project.layers.push(layer); canonicalize(project); project.activeId = layer.id; setTarget('image'); } else invalidatePixels(layer); changed(g.mask ? '已更新蒙版' : '已创建' + layer.name + '图层');
     } else drawOverlay();
   } else if (g.kind !== 'pan' && (g.kind !== 'move' || g.committed)) changed();
+  if(g.kind==='pan'){viewport.style.cursor=space?'grab':tool==='hand'?'grab':tool==='text'?'text':'default';brushCursor?.update();}
   if(g.kind==='pan'||viewport.dataset.viewUpdating==='true')applyView(true);
 }
 viewport.addEventListener('pointerup', finishGesture); viewport.addEventListener('pointercancel', finishGesture);
-window.addEventListener('blur', () => { space = false; finishGesture(); });
+window.addEventListener('blur', () => { space = false; finishGesture();viewport.style.cursor=tool==='hand'?'grab':tool==='text'?'text':'default';brushCursor?.update(); });
 window.addEventListener('keydown', event => {
-  if (['transform','move'].includes(gesture?.kind) && event.key === 'Escape') { event.preventDefault(); const g = gesture; gesture = null; (g.kind === 'move' ? snapping : transformUI).cancel(g); return; }
+  if (['transform','move','shapeRadius','artboardTransform','artboardCreate'].includes(gesture?.kind) && event.key === 'Escape') { event.preventDefault(); const g = gesture; gesture = null; if(g.kind==='shapeRadius')shapes.finish(g,true);else if(g.kind==='artboardTransform')artboardUI.finish(g,true);else if(g.kind==='artboardCreate')drawOverlay();else (g.kind === 'move' ? snapping : transformUI).cancel(g); return; }
   if(event.defaultPrevented)return;
   if(event.ctrlKey&&!event.isComposing){const input=event.target.matches('input,textarea,select'),letter=event.key.toLowerCase();if(input&&['a','c','x','v','z','y'].includes(letter)&&!event.shiftKey)return;const key=(event.shiftKey?'shift+':'')+(event.altKey?'alt+':'')+letter,commands={n:'new',w:'closeDocument',r:'toggleRulers',';':'toggleGuides',o:'open',i:'import',s:'save','shift+s':'saveAs','shift+e':'export',z:'undo','shift+z':'redo',y:'redo',j:'duplicate',g:'group','shift+g':'ungroup','alt+g':'clipping',t:'freeTransform',e:'mergeDown','shift+m':'mergeVisible',a:'selectAll',d:'deselect','0':'fit','1':'actual','shift+c':'copyMerged','shift+v':'pasteImage','shift+n':'addLayer'};if(commands[key]){event.preventDefault();command(commands[key]);return;}}
   if(!event.defaultPrevented&&event.ctrlKey&&event.key.toLowerCase()==='w'){event.preventDefault();command('closeDocument');return;}
   if(!documentOpen||workspace?.isHome())return;
   if (event.isComposing || event.target.matches('input,textarea,select') || event.target.closest('[role=menu]') || document.querySelector('dialog[open]')) return;
-  if (event.code === 'Space') { event.preventDefault(); space = true; return; }
+  if (event.code === 'Space') { event.preventDefault();space=true;viewport.style.cursor=gesture?.kind==='pan'?'grabbing':'grab';brushCursor?.update();return; }
   if(event.shiftKey&&event.key==='F5'){event.preventDefault();command('fillSelection');return;}
   if (event.ctrlKey || event.metaKey || event.altKey || busy || gesture) return;
   if(['brush','eraser'].includes(tool)&&(event.code==='BracketLeft'||event.code==='BracketRight'||['[',']','【','】'].includes(event.key))){event.preventDefault();const input=$('brush-size'),old=Number(input.value),step=old<10?1:old<100?5:old<200?10:25,direction=event.code==='BracketLeft'||['[','【'].includes(event.key)?-1:1;input.value=clamp(old+step*direction,1,500);input.dispatchEvent(new Event('input',{bubbles:true}));brushCursor.update();return;}
@@ -654,7 +676,8 @@ window.addEventListener('keydown', event => {
     try { moveLayer(project, active(), event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0, event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0, editTarget === 'mask' && !active().mask.linked); changed(); } catch (error) { toast(error.message); }
   }
 });
-window.addEventListener('keyup', event => { if (event.code === 'Space') space = false; });
+window.addEventListener('keyup', event => { if(event.code==='Space'){space=false;viewport.style.cursor=gesture?.kind==='pan'?'grabbing':tool==='hand'?'grab':tool==='text'?'text':['move'].includes(tool)?'default':'crosshair';brushCursor?.update();} });
+viewport.addEventListener('dblclick',event=>{if(!documentOpen||busy||space||tool!=='move'||gesture)return;const p=point(event),hit=hitLayer(project,p),found=hit?.type==='text'?hit:project.layers.slice().reverse().find(l=>l.type==='text'&&isVisible(project,l)&&project.layers.indexOf(l)>project.layers.indexOf(hit)&&(()=>{const q=localPoint(l,p),b=bounds(l);return q.x>=0&&q.y>=0&&q.x<=b.width&&q.y<=b.height;})());if(found&&!isLocked(project,found)){event.preventDefault();typeEditor.begin(found);}});
 document.addEventListener('dragover', event => event.preventDefault());
 document.addEventListener('drop', event => event.preventDefault());
 viewport.addEventListener('dragover', event => { event.preventDefault(); viewport.classList.add('dragover'); });
@@ -677,16 +700,16 @@ document.querySelectorAll('[data-psd-choice]').forEach(b => b.onclick = () => $(
 setupColors(()=>editTarget==='mask');
 setupShell(command, setTool, refresh);
 selections=setupSelections({project:()=>project,active,display:()=>composite(project),selection:()=>selection,set:value=>{selection=value;cropRect=null;drawOverlay();},tool:setTool,command,busy:value=>{setBusy(value);if(value)document.querySelector('.optionsbar').inert=false;},toast});
-const cutout=setupCutout({project:()=>project,active,api,command,snapshot,get history(){return history;},capacity,changed,render,putSelection:(mask,layer,kind)=>selections.fromMask(mask,layer,kind),target:setTarget,toast,locked:l=>isLocked(project,l)});
-viewMotion=setupViewMotion({display,viewport,project:()=>project,gesture:()=>gesture,decorate:decorateView,render,view:()=>({scale:zoom,pixelRatio:devicePixelRatio,pan:{...pan},width:viewport.clientWidth,height:viewport.clientHeight}),editingId:()=>typeEditor?.editing?active().id:undefined});
+const cutout=setupCutout({project:()=>project,active,api,command,snapshot,get history(){return history;},capacity,changed,render,putSelection:(mask,layer,kind)=>selections.fromMask(mask,layer,kind),target:setTarget,toast,locked:l=>isLocked(project,l),parentAt:p=>artboardUI.parentAt(p)});
+viewMotion=setupViewMotion({display,viewport,status:toast,project:()=>project,gesture:()=>gesture,decorate:decorateView,render,view:()=>({scale:zoom,pixelRatio:devicePixelRatio,pan:{...pan},width:viewport.clientWidth,height:viewport.clientHeight}),editingId:()=>typeEditor?.editing?active().id:undefined});
 layerMenu=setupLayerMenu({select:l=>{if(!selectedIds.has(l.id))selectLayer(l);else{project.activeId=l.id;setTarget('image');refresh(false);drawOverlay();}},command,busy:()=>busy||!!gesture,focus:()=>viewport.focus()});
 panels=setupPanels();
 viewport.addEventListener('contextmenu',event=>{if(!documentOpen||workspace?.isHome()||event.target.closest('#inline-text'))return;const found=hitLayer(project,point(event));if(found)layerMenu.open(found,event);else event.preventDefault();});
 const fillEditor=setupFillEditor({project:()=>project,active,selection:()=>selection,api,snapshot,get history(){return history;},capacity,render,refresh,changed,toast});
-const layerStyles = setupLayerStyles({active,snapshot,get history(){return history;},changed,render,refresh,toast,locked:l=>isLocked(project,l)});
-const blur=setupBlur({active,selection:()=>selection,snapshot,history:()=>history,render,changed,toast,locked:l=>isLocked(project,l)});
-typeEditor = setupTypeEditor({active,project:()=>project,point,snapshot,get history(){return history;},dirty:()=>dirty,setDirty,changed,render,refresh,checkpoint,capacity,select:selectLayer,tool:setTool,status:v=>$('status').textContent=v,focus:()=>viewport.focus(),locked:l=>isLocked(project,l)});
-transformUI = setupTransformControls({active,project:()=>project,snapshot,get history(){return history;},dirty:()=>dirty,setDirty,render,refresh,point,target:()=>editTarget,selected:()=>selectedIds,view:()=>({pan,zoom}),busy:()=>busy||!!gesture,show:()=>documentOpen&&transformSelected&&$('show-transform').checked && ['move','text'].includes(tool) && !typeEditor.editing&&!document.querySelector('dialog[open]'),status:v=>$('status').textContent=v,begin:(event,g)=>{gesture=g;viewport.setPointerCapture(event.pointerId);viewport.focus();}});
+const layerStyles = setupLayerStyles({active,snapshot,get history(){return history;},changed,render,refresh,renderLayer:(layer,settings)=>render({...project,layers:project.layers.map(l=>l===layer?{...l,...settings}:l)}),toast,locked:l=>isLocked(project,l)});
+const blur=setupBlur({active,capacity,selection:()=>selection,snapshot,history:()=>history,render,changed,toast,locked:l=>isLocked(project,l)});
+typeEditor = setupTypeEditor({active,project:()=>project,point,snapshot,get history(){return history;},dirty:()=>dirty,setDirty,changed,render,refresh,checkpoint,capacity,select:selectLayer,tool:setTool,status:v=>$('status').textContent=v,focus:()=>viewport.focus(),locked:l=>isLocked(project,l),parentAt:p=>artboardUI.parentAt(p)});
+transformUI = setupTransformControls({active,project:()=>project,snapshot,get history(){return history;},dirty:()=>dirty,setDirty,render,refresh,point,target:()=>editTarget,selected:()=>selectedIds,view:()=>({pan,zoom}),busy:()=>busy||!!gesture,show:()=>documentOpen&&transformSelected&&$('show-transform').checked && ['move','text'].includes(tool) && !active().artboard&&!typeEditor.editing&&!document.querySelector('dialog[open]'),status:v=>$('status').textContent=v,begin:(event,g)=>{gesture=g;viewport.setPointerCapture(event.pointerId);viewport.focus();}});
 rulers=setupRulers({project:()=>project,open:()=>documentOpen,view:()=>({pan,zoom}),snapshot,get history(){return history;},checkpoint,changed,draw:()=>drawRulers(project,zoom,pan),busy:()=>busy||!!gesture,status:v=>$('status').textContent=v});
 snapping = setupSnapping({project:()=>project,selected:()=>selectedIds,snapshot,get history(){return history;},capacity,dirty:()=>dirty,setDirty,render,refresh,view:()=>({pan,zoom}),status:v=>$('status').textContent=v});
 $('show-transform').onchange = ()=>{if($('show-transform').checked)transformSelected=true;drawOverlay();};
@@ -694,7 +717,8 @@ document.addEventListener('pointerdown',event=>{if(!documentOpen||busy||gesture|
 for (const [id, key, divide] of [['mask-density', 'density', 100], ['mask-feather', 'feather', 1]]) $(id).addEventListener('change', () => {
   if (busy || !active().mask || !editable()) return; const value = Number($(id).value) / divide; if (!Number.isFinite(value)) return; checkpoint(); active().mask[key] = clamp(value, 0, key === 'density' ? 1 : 100); invalidatePixels(active().mask); changed();
 });
-$('export-format').onchange = () => { $('export-quality').closest('label').hidden = $('export-format').value !== 'jpeg'; }; $('export-format').onchange();
+$('export-scope').onchange=()=>{$('export-artboard').hidden=$('export-scope').value!=='current';};
+$('export-format').onchange = () => { $('export-quality').closest('label').hidden = $('export-format').value !== 'jpeg';const psd=$('export-format').value==='psd';$('export-scope').querySelector('[value=all]').disabled=psd;if(psd&&$('export-scope').value==='all')$('export-scope').value='document';$('export-scope').onchange(); }; $('export-format').onchange();
 new ResizeObserver(() => { if (project) drawRulers(project, zoom, pan); }).observe(viewport);
 brushCursor=setupBrushCursor({tool:()=>tool,zoom:()=>zoom,busy:()=>busy,open:()=>documentOpen,space:()=>space});
 fonts=setupFonts(api,refresh,toast);
@@ -702,12 +726,25 @@ setupNumericScrubbing({busy:()=>busy||!!gesture,begin:input=>{if(!documentOpen||
 $('font-style').onchange=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;if(!typeEditor.owns(active()))checkpoint();clearTextCache(active());const [weight,italic]=$('font-style').value.split(':');Object.assign(active(),{fontWeight:Number(weight),bold:Number(weight)>=700,italic:italic==='true'});changed();};
 for(const [id,key] of [['italic','italic'],['underline','underline']])$(id).onclick=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;if(!typeEditor.owns(active()))checkpoint();clearTextCache(active());active()[key]=!active()[key];changed();};
 document.querySelectorAll('[data-align]').forEach(b=>b.onclick=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;if(!typeEditor.owns(active()))checkpoint();clearTextCache(active());active().align=b.dataset.align;changed();});
+const interactionState={active,project:()=>project,point,snapshot,history:()=>history,dirty:()=>dirty,setDirty,render,refresh,checkpoint,capacity,changed,select:selectLayer,busy:()=>busy||!!gesture,tool:()=>tool,view:()=>({pan,zoom}),open:()=>documentOpen&&!workspace?.isHome(),command,toast,begin:(event,g)=>{gesture=g;viewport.setPointerCapture(event.pointerId);viewport.focus();}};
+artboardUI=setupArtboards({...interactionState,resizeCanvas,shiftView:(x,y)=>{pan={x:pan.x+x*zoom,y:pan.y+y*zoom};$('canvas-wrap').style.transform='translate('+pan.x+'px,'+pan.y+'px) scale('+zoom+')';}});
+shapes=setupShapes({...interactionState,parentAt:p=>artboardUI.parentAt(p),show:()=>documentOpen&&transformSelected&&!typeEditor.editing&&!document.querySelector('dialog[open]')});
+propertiesUI=setupProperties({...interactionState,center:transformPoint,target:editSurface,typeEditor:()=>typeEditor,artboards:()=>artboardUI});
+imageSize=setupImageSize({project:()=>project,busy:()=>busy,setBusy,replace:replaceSize});
+toolGroups=setupToolGroups({canUse:()=>documentOpen&&!workspace?.isHome()&&!busy&&!gesture&&!document.querySelector('dialog[open]'),setTool,tool:()=>tool});
+setupColorPicker({project:()=>project,api,
+  begin:input=>{if(!documentOpen||input.closest('dialog')||typeEditor.editing)return null;colorTransaction={before:snapshot(),dirty,undo:[...history.undoStack],redo:[...history.redoStack],pushed:false};return colorTransaction;},
+  end:async(cancel,transaction)=>{colorTransaction=null;if(cancel&&transaction?.pushed){setBusy(true);try{project=await deserialize(transaction.before);history.undoStack=transaction.undo;history.redoStack=transaction.redo;setDirty(transaction.dirty);render();refresh();}finally{setBusy(false);}}},
+  addSwatch:color=>{const button=document.createElement('button');button.className='swatch';button.title='自定义 '+color;button.setAttribute('aria-label',button.title);button.style.background=color;button.onclick=()=>{$('color').value=color;$('color').dispatchEvent(new Event('input',{bubbles:true}));};$('swatch-grid').append(button);},
+  sample:callback=>{const old=viewport.style.cursor;viewport.style.cursor='crosshair';const clean=()=>{viewport.removeEventListener('pointerdown',pick,true);document.removeEventListener('keydown',escape,true);viewport.style.cursor=old;};const pick=event=>{event.preventDefault();event.stopImmediatePropagation();const p=point(event),x=Math.floor((p.x-Number(display.dataset.originX||0))*display.width/Number(display.dataset.worldWidth||project.width)),y=Math.floor((p.y-Number(display.dataset.originY||0))*display.height/Number(display.dataset.worldHeight||project.height));let color=null;if(x>=0&&y>=0&&x<display.width&&y<display.height){const pixel=display.getContext('2d').getImageData(x,y,1,1).data;color='#'+[...pixel.slice(0,3)].map(n=>n.toString(16).padStart(2,'0')).join('');}clean();callback(color);};const escape=event=>{if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();clean();callback(null);}};viewport.addEventListener('pointerdown',pick,true);document.addEventListener('keydown',escape,true);}
+});
+
 workspace=setupWorkspace({capture:()=>({project,name,dirty,path,sourcePath,history,zoom,pan:{...pan},selection,cropRect,editTarget,selected:[...selectedIds],transformSelected}),
   canSwitch:()=>!busy&&!gesture&&!document.querySelector('dialog[open]')&&!typeEditor.editing,
   restore:doc=>{setTarget('image');({project,name,dirty,path,sourcePath,history,zoom,pan,selection,cropRect,transformSelected}=doc);documentOpen=true;document.body.classList.remove('no-document');selectedIds.clear();doc.selected.forEach(id=>selectedIds.add(id));setTarget(doc.editTarget);api.commitDocument({kind:'activate',path});resizeCanvas();applyView();render();refresh();updateTitle();api.setDirty(workspace.hasDirty());},
   empty:()=>{documentOpen=false;selection=cropRect=null;history=new History();selectedIds.clear();dirty=false;api.commitDocument({kind:'activate',path:null});document.body.classList.add('no-document');$('layer-list').replaceChildren();$('layer-count').textContent='0 个图层';$('dimensions').textContent='';snapping.clear();brushCursor.update();},
   close:id=>{if(workspace.activate(id))command('closeDocument');},open:file=>command('open',file),
-  thumbnail:()=>{const thumb=canvas(240,150),ctx=thumb.getContext('2d'),ratio=Math.min(240/project.width,150/project.height);renderPreview(recentPreview,project,undefined,true,{scale:ratio});ctx.fillStyle='#282828';ctx.fillRect(0,0,240,150);ctx.drawImage(recentPreview,(240-project.width*ratio)/2,(150-project.height*ratio)/2,project.width*ratio,project.height*ratio);return thumb.toDataURL('image/jpeg',.7);}
+  thumbnail:p=>viewMotion.thumbnail(p),release:p=>viewMotion.release(p)
 });
 newProject(1280, 800, 'transparent', '未命名',72,false);documentOpen=false;document.body.classList.add('no-document');workspace.showHome();
 setTool('move');

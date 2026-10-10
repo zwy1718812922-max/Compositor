@@ -79,7 +79,7 @@ function readPsdDocument(buffer,profile,options = {}) {
       if (node.blendingRanges && [node.blendingRanges.compositeGrayBlendSource, node.blendingRanges.compositeGraphBlendDestinationRange, ...node.blendingRanges.ranges.flatMap(r => [r.sourceRange, r.destRange])].some(range => range && range.some((v, i) => v !== [0,0,255,255][i]))) unsupported.add('混合颜色带');
       if (node.vectorMask || node.vectorFill&&!importFill(node.vectorFill) || node.vectorStroke || node.realMask) unsupported.add('矢量或双重蒙版');
       if (node.placedLayer) unsupported.add('智能对象');
-      if (node.artboard) unsupported.add('画板');
+      if (node.artboard&&depth>0) unsupported.add('嵌套画板');
       if (node.text && (!node.right || !node.bottom || node.right === node.left || node.bottom === node.top)) unsupported.add('未缓存外观的文字图层');
       if ((node.mask?.userMaskFeather || 0) > 100) unsupported.add('超过当前范围的蒙版羽化');
       if (node.children && node.blendMode === 'pass through' && node.clipping) unsupported.add('参与剪贴的穿透图层组');
@@ -91,7 +91,7 @@ function readPsdDocument(buffer,profile,options = {}) {
   let resolution = psd.imageResources?.resolutionInfo?.horizontalResolution || 72;
   if (psd.imageResources?.resolutionInfo?.horizontalResolutionUnit === 'PPCM') resolution *= 2.54;
   resolution = Math.max(1, Math.min(9600, resolution));
-  const project = { format: 'com.compositor.windows', version: 6,colorMode:psd.colorMode===4?'CMYK':'RGB',...(profile?{colorProfile:{name:profile.name,data:Buffer.from(profile.bytes).toString('base64')}}:{}), width: psd.width, height: psd.height, resolution, colorSpace: 'sRGB', guides:(psd.imageResources?.gridAndGuidesInformation?.guides||[]).slice(0,200).map(g=>({id:crypto.randomUUID(),axis:g.direction==='vertical'?'x':'y',position:g.location})), layers: [], activeId: '' };
+  const project = { format: 'com.compositor.windows', version: 7,colorMode:psd.colorMode===4?'CMYK':'RGB',...(profile?{colorProfile:{name:profile.name,data:Buffer.from(profile.bytes).toString('base64')}}:{}), width: psd.width, height: psd.height, resolution, colorSpace: 'sRGB', guides:(psd.imageResources?.gridAndGuidesInformation?.guides||[]).slice(0,200).map(g=>({id:crypto.randomUUID(),axis:g.direction==='vertical'?'x':'y',position:g.location})), layers: [], activeId: '' };
   if (!count) {
     const pixels = (profile?psd.imageData:getCompositeImageData(psd));
     if (!pixels) throw new Error('PSD 包含未支持的内容，且没有可用的合成预览。请先栅格化相关图层。');
@@ -102,7 +102,7 @@ function readPsdDocument(buffer,profile,options = {}) {
     // ag-psd 31 stores siblings bottom-to-top; verify with independent recomposition.
     for (const node of nodes || []) {
       const l = base(node.name, node.children ? 'group' : 'raster', node, parentId);
-      if (node.children) { l.collapsed = node.opened === false; convert(node.children, l.id); }
+      if (node.children) { if(node.artboard&&!parentId){const a=node.artboard,r=a.rect;l.x=r.left;l.y=r.top;l.artboard={width:r.right-r.left,height:r.bottom-r.top,background:a.backgroundType===3?'transparent':a.color?'#'+[a.color.r,a.color.g,a.color.b].map(n=>Math.max(0,Math.min(255,Math.round(n||0))).toString(16).padStart(2,'0')).join(''):'#ffffff'};}l.collapsed = node.opened === false; convert(node.children, l.id); }
       else {
         const bitmap = profile?require('./cmyk-psd.cjs').correctLayer(node,profile):getLayerImageData(node);
         Object.assign(l,bitmapFields(bitmap || { width: 1, height: 1, data: new Uint8Array(4) }));
@@ -148,7 +148,7 @@ function writePsdDocument(project, composite) {
   if (project.layers.some(l => l.type === 'text' || l.scale !== 1 || (l.scaleY??1)!==1 || !!l.skew || l.rotation !== 0 || l.mask && (l.mask.scale !== 1 || (l.mask.scaleY??1)!==1 || !!l.mask.skew || l.mask.rotation !== 0))) throw new Error('PSD 导出需要先准备像素数据。');
   const tree = parentId => project.layers.filter(l => (l.parentId || null) === parentId).map(l => {
     const node = { name: l.name, left: Math.round(l.x), top: Math.round(l.y), blendMode: toPsdBlend[l.blend], opacity: l.opacity, hidden: !l.visible, clipping: Boolean(l.clipping), protected: { composite: l.locked, position: l.locked, transparency: l.locked }, transparencyProtected: l.locked };
-    if (l.type === 'group') { node.children = tree(l.id); node.opened = !l.collapsed; }
+    if (l.type === 'group') { node.children = tree(l.id); node.opened = !l.collapsed;if(l.artboard){const a=l.artboard;node.artboard={rect:{left:l.x,top:l.y,right:l.x+a.width,bottom:l.y+a.height},backgroundType:a.background==='transparent'?3:4,color:a.background==='transparent'?{r:255,g:255,b:255}:Object.fromEntries(['r','g','b'].map((key,i)=>[key,parseInt(a.background.slice(1+i*2,3+i*2),16)]))};} }
     else if(l.type==='adjustment')node.adjustment=exportAdjustment(l.adjustment);
     else node.imageData = pixelData(l.data);
     if(l.psdFill)node.vectorFill=exportFill(l.psdFill);

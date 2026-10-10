@@ -1,0 +1,30 @@
+import {baseLayer,transformPoint,localPoint} from './editor.js';
+import {shapeSettings,shapeKinds} from './shape-model.mjs';
+import {canonicalize,isLocked} from './layer-tree.js';
+
+export function setupShapes(state) {
+  const $=id=>document.getElementById(id),panel=$('properties-panel'),appearance=document.createElement('details');appearance.id='shape-properties';appearance.open=true;appearance.hidden=true;
+  appearance.innerHTML='<summary>外观</summary><div class="shape-colors"><label>填充 <input id="shape-fill" type="color" aria-label="形状填充颜色"><input id="shape-no-fill" type="checkbox"> 无</label><label>描边 <input id="shape-stroke" type="color" aria-label="形状描边颜色"><input id="shape-no-stroke" type="checkbox"> 无</label></div><div class="ps-parameter-grid"><label>宽度 <input id="shape-stroke-width" type="number" min="0" max="500" step="0.1" value="1" aria-label="描边宽度"> px</label><select id="shape-dash" aria-label="描边样式"><option value="solid">实线</option><option value="dash">虚线</option><option value="dot">点线</option></select><label id="shape-sides-label">边数 <input id="shape-sides" type="number" min="3" max="32" step="1" value="6"></label></div><div id="shape-radius"><label><input id="shape-radius-link" type="checkbox" checked> 链接四角</label><div class="ps-parameter-grid">'+['左上','右上','右下','左下'].map((n,i)=>'<label>'+n+' <input id="shape-radius-'+i+'" type="number" min="0" step="0.1" value="0" aria-label="'+n+'圆角"> px</label>').join('')+'</div></div><button id="shape-rasterize" class="wide-button">栅格化形状</button>';
+  panel.insertBefore(appearance,$('property-hint'));
+  const corners=document.createElement('div');corners.id='shape-corners';$('viewport').append(corners);
+  function change(fn){const l=state.active();if(l?.type!=='shape'||state.busy()||isLocked(state.project(),l))return;state.checkpoint();fn(l.shape);state.changed();}
+  for(const [id,key] of [['shape-fill','fill'],['shape-stroke','stroke']])$(id).onchange=()=>change(s=>{s[key]=$(id).value;$(id==='shape-fill'?'shape-no-fill':'shape-no-stroke').checked=false;});
+  for(const [id,key] of [['shape-no-fill','fill'],['shape-no-stroke','stroke']])$(id).onchange=()=>change(s=>{s[key]=$(id).checked?'none':$(key==='fill'?'shape-fill':'shape-stroke').value;});
+  $('shape-stroke-width').onchange=()=>change(s=>s.strokeWidth=Math.max(0,Math.min(500,Number($('shape-stroke-width').value)||0)));
+  $('shape-dash').onchange=()=>change(s=>s.dash=$('shape-dash').value);$('shape-sides').onchange=()=>change(s=>s.sides=Math.max(3,Math.min(32,Math.round(Number($('shape-sides').value)||6))));
+  $('shape-radius-link').onchange=()=>change(s=>s.linked=$('shape-radius-link').checked);
+  function radius(s,index,value){const r=Math.max(0,Math.min(Math.min(s.width,s.height)/2,value));s.radii=s.linked?[r,r,r,r]:s.radii.map((v,i)=>i===index?r:v);}
+  for(let i=0;i<4;i++)$('shape-radius-'+i).onchange=()=>change(s=>radius(s,i,Number($('shape-radius-'+i).value)||0));
+  $('shape-rasterize').onclick=()=>state.command('rasterize');
+  for(let i=0;i<4;i++){const b=document.createElement('button');b.dataset.corner=String(i);b.setAttribute('aria-label',['左上','右上','右下','左下'][i]+'圆角手柄');b.onpointerdown=e=>{const l=state.active();if(e.button||state.busy()||isLocked(state.project(),l))return;e.preventDefault();e.stopPropagation();state.begin(e,{kind:'shapeRadius',layer:l,index:i,original:structuredClone(l.shape),before:state.snapshot(),dirty:state.dirty(),redo:[...state.history().redoStack],committed:false});};corners.append(b);}
+  function update(){const l=state.active();appearance.hidden=l?.type!=='shape';corners.hidden=appearance.hidden||!state.show()||!['move',...shapeKinds].includes(state.tool());if(appearance.hidden)return;const s=l.shape,locked=isLocked(state.project(),l);appearance.querySelectorAll('input,select,button').forEach(el=>el.disabled=locked);
+    $('shape-fill').value=s.fill==='none'?'#ffffff':s.fill;$('shape-stroke').value=s.stroke==='none'?'#000000':s.stroke;$('shape-no-fill').checked=s.fill==='none';$('shape-no-stroke').checked=s.stroke==='none';$('shape-stroke-width').value=s.strokeWidth;$('shape-dash').value=s.dash;$('shape-sides').value=s.sides;$('shape-sides-label').hidden=s.kind!=='polygon';$('shape-radius').hidden=s.kind!=='rect';$('shape-radius-link').checked=s.linked;
+    for(let i=0;i<4;i++){const field=$('shape-radius-'+i);field.value=Number(s.radii[i].toFixed(2));field.max=Math.min(s.width,s.height)/2;}
+    if(corners.hidden)return;const {pan,zoom}=state.view();corners.hidden=s.kind!=='rect';corners.querySelectorAll('button').forEach((b,i)=>{const r=Math.min(Math.min(s.width,s.height)/2,Math.max(12/(zoom*l.scale),s.radii[i]*.7)),p=transformPoint(l,{x:[1,2].includes(i)?s.width-r:r,y:i>=2?s.height-r:r});b.style.left=pan.x+p.x*zoom+'px';b.style.top=pan.y+p.y*zoom+'px';b.disabled=locked;});
+  }
+  function move(g,p){const local=localPoint(g.layer,p),s=g.layer.shape,x=[1,2].includes(g.index)?s.width-local.x:local.x,y=g.index>=2?s.height-local.y:local.y;if(!g.committed){state.history().push(g.before);g.committed=true;}radius(s,g.index,Math.min(x,y)/.7);state.setDirty(true);state.render();state.refresh(false);}
+  function finish(g,cancel){if(cancel){g.layer.shape=g.original;if(g.committed){state.history().undoStack.pop();state.history().redoStack=g.redo;}state.setDirty(g.dirty);state.render();state.refresh();}else if(g.committed)state.changed('已调整形状圆角');}
+  function create(g){const x=Math.min(g.start.x,g.end.x),y=Math.min(g.start.y,g.end.y),w=Math.max(1,Math.abs(g.end.x-g.start.x)),h=Math.max(1,Math.abs(g.end.y-g.start.y));state.capacity();state.checkpoint();const l={...baseLayer({rect:'矩形',ellipse:'椭圆',triangle:'三角形',polygon:'多边形',line:'直线'}[g.kind],'shape'),x,y,shape:shapeSettings(g.kind,w,h,g.color),opacity:g.opacity};
+    if(g.kind==='line'&&(g.end.x-g.start.x)*(g.end.y-g.start.y)<0){l.flipY=true;l.y=y+h;}if(g.kind==='line'){l.shape.horizontal=g.start.y===g.end.y;l.shape.vertical=g.start.x===g.end.x;}l.parentId=state.parentAt(g.start);state.project().layers.push(l);canonicalize(state.project());state.select(l);state.changed('已创建可编辑形状');return l;}
+  return{update,move,finish,create};
+}

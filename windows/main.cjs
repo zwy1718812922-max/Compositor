@@ -109,6 +109,13 @@ app.whenReady().then(() => {
     }
     return images;
   });
+  handle('artboards:export',async(items,format,resolution=72)=>{
+    if(!['png','jpeg'].includes(format)||!Array.isArray(items)||!items.length||items.length>100)throw new Error('画板导出数据无效。');
+    const mime='image/'+format;let size=0;for(const item of items){if(typeof item.data!=='string'||!item.data.startsWith('data:'+mime+';base64,')||(size+=item.data.length)>MAX_BYTES*1.4)throw new Error('画板导出数据过大或格式无效。');}
+    const chosen=await dialog.showOpenDialog(win,{title:'选择全部画板的导出文件夹',properties:['openDirectory','createDirectory']});if(chosen.canceled)return null;
+    const directory=chosen.filePaths[0],extension=format==='jpeg'?'jpg':'png',output=[],{exportName}=require('./src/export-name.mjs');
+    for(const item of items){const name=exportName(item.name);let index=1,file;do{file=path.join(directory,name+(index===1?'':' ('+index+')')+'.'+extension);index++;}while(await fs.stat(file).then(()=>true,()=>false));await atomicWrite(file,setImageResolution(Buffer.from(item.data.split(',')[1],'base64'),format,resolution));output.push(file);}return output;
+  });
   handle('image:export', async (data, format, resolution = 72) => {
     const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : null;
     if (!mime || typeof data !== 'string' || !data.startsWith(`data:${mime};base64,`) || data.length > MAX_BYTES * 1.4) throw new Error('导出数据无效。');

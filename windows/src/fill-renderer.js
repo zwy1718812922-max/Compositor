@@ -15,7 +15,7 @@ export function paintFill(ctx,layer) {
   else {t.fillRect(0,0,16,16);t.fillRect(16,16,16,16);}
   const pattern=ctx.createPattern(tile,'repeat');pattern.setTransform(new DOMMatrix().scale(f.scale/100));ctx.fillStyle=pattern;
  }
- ctx.fillRect(0,0,layer.width,layer.height);
+ ctx.save();ctx.globalAlpha*=f.alpha??1;ctx.fillRect(0,0,layer.width,layer.height);ctx.restore();
 }
 export function applyAdjustment(ctx,project,layer) {
  const before=ctx.getImageData(0,0,ctx.canvas.width,ctx.canvas.height),data=new Uint8ClampedArray(before.data);adjustPixels(data,layer.adjustment.kind,layer.adjustment.values);

@@ -3,7 +3,7 @@ import { textLayer, bounds, textFont,canvas,localPoint,transformPoint } from './
 import { canonicalize, isVisible } from './layer-tree.js';
 import { lastTextColor,rememberColor } from './colors.js';
 const $ = id => document.getElementById(id);
-const signature = l => JSON.stringify(['scaleY','skew','italic','fontWeight','underline','text','font','fontSize','color','bold','align','lineHeight','letterSpacing','textMode','boxWidth','boxHeight','x','y','scale','rotation','opacity','blend'].map(k => l[k]));
+const signature = l => JSON.stringify(['scaleY','skew','italic','fontWeight','underline','text','font','fontSize','color','bold','align','lineHeight','letterSpacing','textMode','boxWidth','boxHeight','paragraph','strike','flipX','flipY','x','y','scale','rotation','opacity','blend'].map(k => l[k]));
 export function clearTextCache(layer) { if (layer.type === 'text' && layer.textRasterCache) { if(layer.textGeometry){const m=layer.textGeometry.matrix,a=affine(layer),matrix=multiply(a,m.slice(0,4)),measure=canvas(1,1).getContext('2d');measure.font=textFont(layer);measure.textBaseline='top';const ascent=measure.measureText('Mg').actualBoundingBoxAscent;measure.textBaseline='alphabetic';const baseline=measure.measureText('Mg').actualBoundingBoxAscent-ascent,origin=layer.textCacheOrigin||layer,offset=vector(a,{x:m[4]-origin.x,y:m[5]-origin.y}),top=vector(matrix,{x:0,y:-baseline});Object.assign(layer,{x:layer.x+offset.x+top.x,y:layer.y+offset.y+top.y,...decompose(matrix)});delete layer.textGeometry;} delete layer.canvas; delete layer.data; delete layer.textRasterCache; } }
 export function setupTypeEditor(state) {
   let session = null,resize = null; const input = $('inline-text'),frame=document.createElement('div');frame.id='text-edit-frame';frame.hidden=true;input.before(frame);
@@ -19,7 +19,7 @@ export function setupTypeEditor(state) {
     const layer = session.layer, size = bounds(layer);
     if (input.value !== layer.text) input.value = layer.text;
     input.style.left = layer.x + 'px'; input.style.top = layer.y + 'px'; input.style.width = Math.max(24,size.width) + 'px'; input.style.height = Math.max(layer.fontSize * (layer.lineHeight || 1.35),size.height) + 'px'; input.style.font = textFont(layer); input.style.lineHeight = layer.lineHeight || 1.35; input.style.textAlign = layer.align || 'left'; input.style.letterSpacing = (layer.letterSpacing || 0)+'px'; input.style.caretColor = layer.color;
-    input.style.color=layer.color;input.style.opacity=layer.opacity;input.style.textDecoration=layer.underline?'underline':'none';input.style.transform = `matrix(${affine(layer).join(',')},0,0)`; input.wrap = layer.textMode === 'paragraph' ? 'soft' : 'off'; input.style.whiteSpace = layer.textMode === 'paragraph' ? 'pre-wrap' : 'pre'; input.style.wordBreak = layer.textMode === 'paragraph' ? 'break-all' : 'normal';
+    input.style.color=layer.color;input.style.opacity=layer.opacity;input.style.textDecoration=[layer.underline?'underline':'',layer.strike?'line-through':''].filter(Boolean).join(' ')||'none';input.style.direction=layer.paragraph?.direction||'ltr';input.style.paddingLeft=(layer.paragraph?.leftIndent||0)+'px';input.style.paddingRight=(layer.paragraph?.rightIndent||0)+'px';input.style.textIndent=(layer.paragraph?.firstIndent||0)+'px';input.style.transform = `matrix(${affine(layer).join(',')},0,0)`; input.wrap = layer.textMode === 'paragraph' ? 'soft' : 'off'; input.style.whiteSpace = layer.textMode === 'paragraph' ? 'pre-wrap' : 'pre'; input.style.wordBreak = layer.textMode === 'paragraph' ? 'break-all' : 'normal';
     frame.hidden=layer.textMode!=='paragraph';frame.style.left=input.style.left;frame.style.top=input.style.top;frame.style.width=input.style.width;frame.style.height=input.style.height;frame.style.transform=input.style.transform;input.classList.toggle('paragraph-editing',!frame.hidden);
   }
   function finish(commit = true) {
@@ -47,7 +47,7 @@ export function setupTypeEditor(state) {
     state.capacity(); const before = state.snapshot(), dirty = state.dirty(), current = state.active(), p = state.project();
     const l = textLayer('输入文字',Math.round(rect.x),Math.round(rect.y),lastTextColor()); l.font = $('type-font').value; l.fontSize = Number($('type-size').value) || 64; l.bold = $('type-bold').classList.contains('active'); l.align = $('type-align').value; l.textMode = paragraph ? 'paragraph' : 'point';
     if (paragraph) { l.boxWidth = Math.max(l.fontSize,rect.width); l.boxHeight = Math.max(l.fontSize*1.35,rect.height); }
-    l.parentId = current.type === 'group' ? current.id : current.parentId || null; p.layers.push(l); canonicalize(p); p.activeId = l.id;
+    l.parentId=state.parentAt?.(rect)??(current.type==='group'?current.id:current.parentId||null); p.layers.push(l); canonicalize(p); p.activeId = l.id;
     begin(l,true,before,dirty); state.changed('直接在画布上输入文字');
   }
   input.oninput = () => { if (!session) return; session.layer.text = input.value; state.setDirty(true); state.render(); update(); };

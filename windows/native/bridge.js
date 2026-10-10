@@ -1,3 +1,4 @@
+import {exportName} from '../src/export-name.mjs';
 import { Buffer } from 'buffer';
 import { validateProject } from '../project.cjs';
 import { setImageResolution } from '../image-metadata.cjs';
@@ -14,6 +15,7 @@ window.desktop={
   fonts:()=>invoke('fonts:list'),
   colorProfile:kind=>invoke('color:profile',kind),
   importImages:()=>invoke('image:import'),
+  async exportArtboards(items,format,resolution){try{if(!['png','jpeg'].includes(format)||!Array.isArray(items)||!items.length||items.length>100)throw new Error('画板导出数据无效。');const encoded=items.map(item=>({name:exportName(item.name),data:setImageResolution(Buffer.from(item.data.split(',')[1],'base64'),format,resolution).toString('base64')}));return await invoke('artboards:export',{items:encoded,format});}catch(error){return {ok:false,error:error.message};}},
   async exportImage(data,format,resolution){try{const bytes=setImageResolution(Buffer.from(data.split(',')[1],'base64'),format,resolution);return await invoke('image:export',{data:bytes.toString('base64'),format});}catch(error){return{ok:false,error:error.message};}},
   async exportPsd(payload){try{const selected=await invoke('psd:select');if(!selected.ok||!selected.value)return selected;const bytes=await psd('write',payload);return await invoke('psd:write',{path:selected.value,data:Buffer.from(bytes).toString('base64')});}catch(error){return{ok:false,error:error.message};}},
   windowAction:action=>invoke('window:action',action),copyImage:data=>invoke('image:copy',data),pasteImage:()=>invoke('image:paste'),setDirty:dirty=>invoke('document:dirty',dirty),commitDocument:kind=>invoke('document:commit',kind),close:()=>invoke('document:close'),rendererReady:()=>invoke('renderer:ready'),onCommand:callback=>listeners.push(callback)

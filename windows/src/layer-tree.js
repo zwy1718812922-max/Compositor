@@ -29,6 +29,7 @@ export function panelLayers(project) {
   visit(null, 0); return result;
 }
 export function moveToGroup(project, layer, parentId) {
+  if(layer.artboard&&parentId)throw new Error('画板必须保留在图层列表根级。');
   if (parentId === layer.id || ancestors(project, project.layers.find(l => l.id === parentId) || {}).some(l => l.id === layer.id)) throw new Error('不能将图层组移入自身或子组。');
   if (parentId && ancestors(project, project.layers.find(l => l.id === parentId)).length + (layer.type === 'group' ? maxDepth(project, layer) : 0) >= 9) throw new Error('图层组最多嵌套 10 层。');
   layer.parentId = parentId || null; canonicalize(project);

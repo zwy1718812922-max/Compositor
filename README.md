@@ -2,7 +2,7 @@
 
 本地版本管理说明见 [Git 工作流程](docs/git-workflow.zh-CN.md)。
 
-> **中文 Windows 11 版 0.8.0（本地移植）**：见 [使用说明](windows/README.zh-CN.md)。双击仓库根目录的 `启动中文版.cmd`，或使用 `windows/dist` 中轻量安装包。大 PSD 连续缩放使用缓存预览，停止后恢复清晰显示；新增 Ctrl+J 选区复制、Ctrl+Z / Ctrl+Y、括号调节笔尖、画布内文字及段落框编辑、浮动面板与画布、图层右键菜单及 Shift 范围选择。保留 PSD 直接图层解码、最近项目主页、多文档、蒙版、FX、字体收藏、数字拖动、标尺、CMYK 分层 PSD 与本地 U²-Net/NPU 抠图。AI 组件按需安装，原 macOS 源码保留不变。
+> **中文 Windows 11 版 0.9.0（本地移植）**：见 [使用说明](windows/README.zh-CN.md)。双击根目录的 `启动中文版.cmd`，或使用 `windows/dist` 中轻量安装包。新增原始分辨率实时缩放、普通滚轮平移/Alt 缩放/空格抓手、PS 风格属性与拾色器、可编辑形状和拖动圆角、后台图像大小调整、多个画板及分别导出；最近项目预览采用完整颜色合成。保留分层 PSD、文字、蒙版、FX、多文档、字体收藏、标尺、CMYK 与独立 AI/NPU 抠图组件。原 macOS 源码保留不变。
 
 Adobe Photoshop costs too much and tools like GIMP don’t feel familiar enough for me to stay in flow. That’s why I built Compositor.
 

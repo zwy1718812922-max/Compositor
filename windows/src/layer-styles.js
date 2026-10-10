@@ -18,7 +18,7 @@ export function setupLayerStyles(state) {
   function preview() {
     cancelAnimationFrame(frame); frame = requestAnimationFrame(() => {
       const l = get(), original = session.original;
-      if (!$('fx-preview').checked) { const settings = { styles: l.styles, stylesEnabled: l.stylesEnabled, fillOpacity: l.fillOpacity, opacity: l.opacity, blend: l.blend, stylesModified:l.stylesModified }; Object.assign(l, original); state.render(); Object.assign(l, settings); }
+      if (!$('fx-preview').checked)state.renderLayer(l,original);
       else state.render();
       const c = document.createElement('canvas'); c.width = c.height = 192; const ctx = c.getContext('2d'); ctx.fillStyle = '#bfbfbf'; ctx.fillRect(54,54,84,84);
       const sample = applyEffects(c, l), target = $('fx-sample').getContext('2d'); target.clearRect(0,0,192,192); target.globalAlpha = l.opacity; target.drawImage(sample,0,0); target.globalAlpha = 1;

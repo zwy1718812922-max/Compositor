@@ -1,18 +1,18 @@
-# Windows project format v1–v6
+# Windows project format v1–v7
 
-Windows 0.7.0 saves v6 and reads v1–v5. See [v6 color modes](../docs/windows-format-v6.md), [v5 additions](../docs/windows-format-v5.md) and [v4 additions](../docs/windows-format-v4.md). The native WebView2 and Electron builds use the same renderer, schema validation, and PSD conversion code.
+Windows 0.9.0 saves v7 and reads v1–v6. See [v7 shapes/artboards/paragraphs](../docs/windows-format-v7.md), [v6 color modes](../docs/windows-format-v6.md), [v5 additions](../docs/windows-format-v5.md) and [v4 additions](../docs/windows-format-v4.md). The native WebView2 and Electron builds use the same renderer, schema validation, and PSD conversion code.
 
 The Windows port uses a separate UTF-8 JSON format, with extension `.ccomp`, to avoid claiming compatibility with the upstream macOS `.comp` package. The macOS manifest schema and `ProjectManifest.current` are unchanged.
 
 - `format`: `com.compositor.windows`
-- `version`: `5` for new saves; versions `1`–`4` remain readable
+- `version`: `7` for new saves; versions `1`–`6` remain readable
 - `width`, `height`: integer document pixels, each 1–16384 in v2; v1 remains limited to 4096
 - `resolution`: pixels/inch, finite 1–9600, required by v2; v1 defaults to 72 on load
 - `colorSpace`: `sRGB`, required by v2
 - `activeId`: an existing layer ID
 - `layers`: bottom-to-top array, 1–100 layers
 
-Every layer has a unique string `id`, a `name` up to 200 characters, a `type` (`raster`, `text`, v3 `group`, or v5 `fill` / `adjustment`), numeric `x`/`y` (±100000), `scale` (0.01–100), clockwise `rotation` in degrees (±36000), `opacity` (0–1), Canvas 2D `blend`, and boolean `visible`/`locked`.
+Every layer has a unique string `id`, a `name` up to 200 characters, a `type` (`raster`, `text`, v3 `group`, v5 `fill` / `adjustment`, or v7 `shape`), numeric `x`/`y` (±100000), `scale` (0.01–100), clockwise `rotation` in degrees (±36000), `opacity` (0–1), Canvas 2D `blend`, and boolean `visible`/`locked`.
 
 Transforms use the top-left origin: translate, rotate, scale. v1–v4 use uniform scaling; v5 adds independent vertical scale and shear as described in the v5 additions. Supported blends: source-over, multiply, screen, overlay, darken, lighten, difference, soft-light, hard-light.
 

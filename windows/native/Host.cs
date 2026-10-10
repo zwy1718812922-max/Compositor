@@ -49,7 +49,7 @@ internal sealed class EditorWindow : Form {
     static bool Flag(object value) { return value is bool && (bool)value; }
     static double Number(object value) { return Convert.ToDouble(value); }
     public EditorWindow() {
-        Text="Compositor 中文版 0.8.0"; ClientSize=new Size(1440,960);MinimumSize=new Size(1024,720);StartPosition=FormStartPosition.CenterScreen;
+        Text="Compositor 中文版 0.9.0"; ClientSize=new Size(1440,960);MinimumSize=new Size(1024,720);StartPosition=FormStartPosition.CenterScreen;
         FormBorderStyle=FormBorderStyle.None;BackColor=Color.FromArgb(38,38,38);Padding=new Padding(1);AutoScaleMode=AutoScaleMode.Dpi;
         MaximizedBounds=Screen.FromControl(this).WorkingArea;var icon=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"assets","icon.ico");if(File.Exists(icon))Icon=new Icon(icon);
         web.Dock=DockStyle.Fill;web.DefaultBackgroundColor=BackColor;Controls.Add(web);Controls.Add(splash);splash.BringToFront();
@@ -120,13 +120,18 @@ internal sealed class EditorWindow : Form {
                 var project=Json().DeserializeObject(Encoding.UTF8.GetString(bytes));pendingPath=file;return new {project,path=file,name};
             }
             case "project:save": {
-                var project=Object(Get(p,"project"));if(Field(project,"format")!="com.compositor.windows"||Number(Get(project,"version"))<1||Number(Get(project,"version"))>6)throw new Exception("项目格式无效。");
+                var project=Object(Get(p,"project"));if(Field(project,"format")!="com.compositor.windows"||Number(Get(project,"version"))<1||Number(Get(project,"version"))>7)throw new Exception("项目格式无效。");
                 var file=currentPath;if(file==null||Flag(Get(p,"saveAs")))file=SavePath("Compositor 项目|*.ccomp",file??"未命名.ccomp");if(file==null)return null;
                 var bytes=Encoding.UTF8.GetBytes(Json().Serialize(project));await Task.Run(()=>AtomicWrite(file,bytes));currentPath=file;return new {path=file,name=Path.GetFileNameWithoutExtension(file)};
             }
             case "image:import": {
                 string[] files;if(testing&&!String.IsNullOrEmpty(mockOpen))files=new[]{mockOpen};else using(var d=new OpenFileDialog {Title="导入图片为图层",Filter="图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp",Multiselect=true}){if(d.ShowDialog(this)!=DialogResult.OK)return new object[0];files=d.FileNames;}
                 var output=new List<object>();long total=0;foreach(var file in files){total+=new FileInfo(file).Length;if(total>MaxBytes)throw new Exception("导入图片总大小超过 128 MB。");var ext=Path.GetExtension(file).ToLowerInvariant();var mime=ext==".png"?"image/png":ext==".jpg"||ext==".jpeg"?"image/jpeg":ext==".webp"?"image/webp":ext==".bmp"?"image/bmp":null;if(mime==null)throw new Exception("不支持此图片格式。");var bytes=await Task.Run(()=>ReadBytes(file));output.Add(new {name=Path.GetFileName(file),data="data:"+mime+";base64,"+Convert.ToBase64String(bytes)});}return output;
+            }
+            case "artboards:export": {
+                var format=Field(p,"format");if(format!="png"&&format!="jpeg")throw new Exception("图片格式无效。");var items=Get(p,"items") as object[];if(items==null||items.Length<1||items.Length>100)throw new Exception("画板导出数据无效。");
+                string directory=null;if(testing&&!String.IsNullOrEmpty(mockSave))directory=Path.GetDirectoryName(mockSave);else using(var d=new FolderBrowserDialog {Description="选择全部画板的导出文件夹",ShowNewFolderButton=true})if(d.ShowDialog(this)==DialogResult.OK)directory=d.SelectedPath;if(directory==null)return null;
+                var files=new List<string>();var extension=format=="png"?"png":"jpg";long total=0;foreach(var item in items){var record=Object(item);var name=Field(record,"name");foreach(var c in Path.GetInvalidFileNameChars())name=name.Replace(c,'_');name=name.TrimEnd(' ','.');if(String.IsNullOrEmpty(name))name="画板";var bytes=Convert.FromBase64String(Field(record,"data"));total+=bytes.Length;if(total>MaxBytes)throw new Exception("全部画板导出数据超过 128 MB。");var index=1;var file=Path.Combine(directory,name+"."+extension);while(File.Exists(file)){index++;file=Path.Combine(directory,name+" ("+index+")."+extension);}await Task.Run(()=>AtomicWrite(file,bytes));files.Add(file);}return files;
             }
             case "image:export": {
                 var format=Field(p,"format");if(format!="png"&&format!="jpeg")throw new Exception("图片格式无效。");var file=SavePath(format=="png"?"PNG 图片|*.png":"JPEG 图片|*.jpg",format=="png"?"作品.png":"作品.jpg");if(file==null)return null;var bytes=Convert.FromBase64String(Field(p,"data"));await Task.Run(()=>AtomicWrite(file,bytes));return file;

@@ -88,7 +88,7 @@ export function setupNewDocument(onCreate) {
     if (![width, height, ppi].every(n => Number.isFinite(n) && n > 0) || ppi < 1 || ppi > 9600) throw new Error('请输入有效的宽度、高度和分辨率（1–9600 ppi）。');
     if (pixelWidth < 1 || pixelHeight < 1 || pixelWidth > 16384 || pixelHeight > 16384 || pixelWidth * pixelHeight > 64 * 1024 * 1024) throw new Error('画布每边需为 1–16384 像素，总像素不可超过 6400 万。请减小尺寸或分辨率。');
     return {
-      width: pixelWidth, height: pixelHeight, resolution: ppi,colorMode:$('new-color-mode').value,
+      width: pixelWidth, height: pixelHeight, resolution: ppi,artboard:$('new-artboard').checked,colorMode:$('new-color-mode').value,
       background: $('new-background').value === 'custom' ? $('new-background-color').value : $('new-background').value,
       title: $('new-name').value.trim() || '未标题-' + sequence,
       preset: { width, height, unit, resolution: ppi }
@@ -113,6 +113,7 @@ export function setupNewDocument(onCreate) {
   function status(message) { $('preset-status').textContent = message; $('preset-status').hidden = false; }
   function select(item) {
     selected = item.id; unit = item.unit; resolutionUnit = 'ppi';
+    $('new-artboard').checked=!!item.artboard;
     $('new-width').value = item.width; $('new-height').value = item.height;
     $('new-unit').value = unit; $('new-resolution-unit').value = 'ppi'; $('new-resolution').value = item.resolution;
     $('new-resolution').min = 1; $('new-resolution').max = 9600;
@@ -210,7 +211,7 @@ export function setupNewDocument(onCreate) {
     try {
       const p = settings();
       const title = $('new-name').value.trim();
-      const item = { ...p.preset, id: 'saved-' + crypto.randomUUID(), name: title && !title.startsWith('未标题-') ? title : '自定义 ' + p.preset.width + ' × ' + p.preset.height + ' ' + units[unit].name, background: p.background };
+      const item = { ...p.preset, id: 'saved-' + crypto.randomUUID(), name: title && !title.startsWith('未标题-') ? title : '自定义 ' + p.preset.width + ' × ' + p.preset.height + ' ' + units[unit].name, background: p.background,artboard:p.artboard };
       store.saved.unshift(item); store.saved = store.saved.slice(0, 30); persist();
       selected = item.id; chooseCategory('saved'); status('预设已保存，可在“已保存”分类中使用。');
     } catch (error) { status(error.message); }
@@ -222,7 +223,7 @@ export function setupNewDocument(onCreate) {
     event.preventDefault();if($('create-document').disabled)return;$('create-document').disabled=true;
     try {
       const p = settings();await onCreate(p);
-      const item = { ...p.preset, id: 'recent-' + crypto.randomUUID(), name: p.title, background: p.background };
+      const item = { ...p.preset, id: 'recent-' + crypto.randomUUID(), name: p.title, background: p.background,artboard:p.artboard };
       store.recent = [item, ...store.recent.filter(old => old.width !== item.width || old.height !== item.height || old.unit !== item.unit || old.resolution !== item.resolution || old.background !== item.background)].slice(0, 10);
       persist(); sequence++; $('new-dialog').close();
     } catch (error) { $('new-error').textContent = error.message; $('new-error').hidden = false; }finally{$('create-document').disabled=false;}
