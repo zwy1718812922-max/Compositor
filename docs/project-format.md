@@ -1,6 +1,6 @@
 # Compositor project format, versions 1–11
 
-The independent Chinese Windows port uses .ccomp v5 with affine transforms, fill/adjustment layers, guides, groups, masks, clipping and resolution metadata; it reads v1–v4 files. See [Windows project format](../windows/FORMAT.md). This does not change the macOS .comp schema or ProjectManifest.current.
+The independent Chinese Windows port uses .ccomp v6 with affine transforms, fill/adjustment layers, guides, groups, masks, clipping and resolution metadata; it reads v1–v5 files. See [Windows project format](../windows/FORMAT.md). This does not change the macOS .comp schema or ProjectManifest.current.
 
 A `.comp` file is a macOS document package containing `manifest.json` and an `images/` directory of `<layer UUID>.png` assets.
 

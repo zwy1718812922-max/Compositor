@@ -99,6 +99,12 @@ def main(job):
         raise ValueError("Image exceeds pixel limit")
     rgb = Image.new("RGB", source.size, "white")
     rgb.paste(source, mask=source.getchannel("A"))
+    region = job.get("region")
+    if region:
+        x, y, width, height = (int(region[k]) for k in ("x", "y", "width", "height"))
+        if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > source.width or y + height > source.height:
+            raise ValueError("Object selection region is outside the image")
+        rgb = rgb.crop((x, y, x + width, y + height))
     pixels = np.asarray(rgb.resize((320, 320), Image.Resampling.LANCZOS), dtype=np.float32)
     pixels /= max(float(pixels.max()), 1.0)
     pixels = (pixels - np.array([.485, .456, .406], dtype=np.float32)) / np.array([.229, .224, .225], dtype=np.float32)
@@ -116,7 +122,11 @@ def main(job):
         result = compiled([tensor])[compiled.output(0)]
     pred = result[0, 0]
     pred = (pred - pred.min()) / max(float(pred.max() - pred.min()), 1e-8)
-    mask = Image.fromarray((np.clip(pred, 0, 1) * 255).astype("uint8")).resize(source.size, Image.Resampling.LANCZOS).convert("RGB")
+    mask = Image.fromarray((np.clip(pred, 0, 1) * 255).astype("uint8")).resize(rgb.size, Image.Resampling.LANCZOS).convert("RGB")
+    if region:
+        full = Image.new("RGB", source.size, "black")
+        full.paste(mask, (x, y))
+        mask = full
     stream = io.BytesIO()
     mask.save(stream, format="PNG")
     emit(progress=95, stage="Preparing editable mask")

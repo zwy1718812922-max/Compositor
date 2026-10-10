@@ -18,10 +18,12 @@ function pngPixels(data, limit = 16384) {
   return w * h;
 }
 function validateProject(p) {
-  if (!p || p.format !== FORMAT || ![1, 2, 3, 4, 5].includes(p.version)) throw new Error('不支持的项目格式或版本。请打开 .ccomp 项目。');
+  if (!p || p.format !== FORMAT || ![1, 2, 3, 4, 5, 6].includes(p.version)) throw new Error('不支持的项目格式或版本。请打开 .ccomp 项目。');
   const limit = p.version === 1 ? 4096 : 16384;
   if (![p.width, p.height].every(n => Number.isInteger(n) && number(n, 1, limit)) || p.width * p.height > 64 * 1024 * 1024) throw new Error('画布尺寸超过此项目版本的限制。');
   if (p.version >= 2 && (!number(p.resolution, 1, 9600) || p.colorSpace !== 'sRGB')) throw new Error('分辨率或颜色空间无效。');
+  if(p.version<6&&(p.colorMode||p.colorProfile))throw new Error('CMYK 工作模式需要 v6。');
+  if(p.version>=6){if(!['RGB','CMYK'].includes(p.colorMode))throw new Error('颜色模式无效。');if(p.colorMode==='CMYK'){const profile=p.colorProfile;if(!profile||typeof profile.name!=='string'||profile.name.length>200||typeof profile.data!=='string'||profile.data.length>6*1024*1024||!/^[A-Za-z0-9+/]+={0,2}$/.test(profile.data))throw new Error('CMYK 配置文件无效。');const b=Buffer.from(profile.data,'base64');if(b.length<128||b.length>4*1024*1024||b.toString('ascii',36,40)!=='acsp'||b.toString('ascii',16,20)!=='CMYK')throw new Error('需要 CMYK ICC 配置文件。');}}
   if (!Array.isArray(p.layers) || p.layers.length < 1 || p.layers.length > 100) throw new Error('项目需要 1–100 个图层。');
   const ids = new Set();
   let pixels = 0;

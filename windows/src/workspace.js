@@ -1,0 +1,22 @@
+const key='compositor.recentProjects.v1';
+export function setupWorkspace(state){
+ const documents=[];let current=null,home=false,recents=[];
+ try{recents=JSON.parse(localStorage.getItem(key))||[];recents=recents.filter(r=>typeof r.path==='string'&&typeof r.name==='string').slice(0,20);}catch{}
+ const tabs=document.getElementById('document-tabs'),activeTab=document.getElementById('active-document-tab'),screen=document.getElementById('home-screen');
+ function capture(){if(current){const i=documents.findIndex(d=>d.id===current);if(i>=0)documents[i]={...state.capture(),id:current};}}
+ function render(){
+  tabs.querySelectorAll('.inactive-document-tab').forEach(e=>e.remove());activeTab.hidden=!current||home;
+  for(const doc of documents){if(doc.id===current&&!home){tabs.append(activeTab);continue;}const tab=document.createElement('div');tab.className='inactive-document-tab';tab.setAttribute('role','tab');tab.dataset.documentId=doc.id;tab.setAttribute('aria-selected','false');const name=document.createElement('button');name.textContent=(doc.dirty?'● ':'')+doc.name;name.title=doc.sourcePath||doc.path||doc.name;name.onclick=()=>activate(doc.id);const close=document.createElement('button');close.textContent='×';close.setAttribute('aria-label','关闭 '+doc.name);close.onclick=()=>state.close(doc.id);tab.append(name,close);tabs.append(tab);}
+  activeTab.dataset.documentId=current||'';activeTab.setAttribute('role','tab');activeTab.setAttribute('aria-selected','true');
+ }
+ function add(){current=crypto.randomUUID();documents.push({...state.capture(),id:current});home=false;screen.hidden=true;document.body.classList.remove('home-visible');render();}
+ function activate(id,force=false){if(!force&&!state.canSwitch())return false;capture();const doc=documents.find(d=>d.id===id);if(!doc)return false;current=id;home=false;screen.hidden=true;document.body.classList.remove('home-visible');state.restore(doc);render();return true;}
+ function showHome(){capture();home=true;screen.hidden=false;document.body.classList.add('home-visible');drawRecents();render();}
+ function remove(){const index=documents.findIndex(d=>d.id===current);documents.splice(index,1);current=null;if(documents.length){const doc=documents[Math.min(index,documents.length-1)];current=doc.id;state.restore(doc);home=false;screen.hidden=true;document.body.classList.remove('home-visible');}else{state.empty();showHome();}render();}
+ function drawRecents(){const list=document.getElementById('recent-projects');list.replaceChildren();document.getElementById('recent-empty').hidden=recents.length>0;for(const item of recents){const card=document.createElement('button');card.className='recent-project';card.title=item.path;const image=document.createElement('img');image.alt='';if(/^data:image\/jpeg;base64,/.test(item.preview||''))image.src=item.preview;else image.hidden=true;const title=document.createElement('strong');title.textContent=item.name;const detail=document.createElement('span');detail.textContent=(item.width&&item.height?item.width+' × '+item.height+' · ':'')+new Date(item.modified).toLocaleString('zh-CN');const path=document.createElement('small');path.textContent=item.path;card.append(image,title,detail,path);card.onclick=()=>state.open(item.path);const wrapper=document.createElement('article'),forget=document.createElement('button');forget.className='forget-recent';forget.textContent='×';forget.title='从最近项目中移除（保留原文件）';forget.onclick=()=>{recents=recents.filter(r=>r.path!==item.path);persist();drawRecents();};wrapper.append(card,forget);list.append(wrapper);}}
+ function persist(){try{localStorage.setItem(key,JSON.stringify(recents));}catch{}}
+ function remember(path){if(!path)return;const doc=state.capture(),preview=state.thumbnail();recents=[{path,name:doc.name,width:doc.project.width,height:doc.project.height,preview,modified:Date.now()},...recents.filter(r=>r.path.toLowerCase()!==path.toLowerCase())].slice(0,20);persist();}
+ document.getElementById('show-home').onclick=()=>{if(state.canSwitch())showHome();};
+ document.getElementById('home-back').onclick=()=>{if(current)activate(current);};
+ return{add,capture,activate,remove,showHome,remember,render,documents,beginNew(){capture();current=null;},current:()=>current,isHome:()=>home,findPath:path=>documents.find(d=>[d.path,d.sourcePath].some(p=>p&&p.toLowerCase()===path.toLowerCase())),hasDirty(){capture();return documents.some(d=>d.dirty);}};
+}

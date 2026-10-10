@@ -5,7 +5,7 @@ test.beforeEach(async()=>{
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;errors=[];
   const args=['--user-data-dir='+test.info().outputPath('profile')];
   app=await electron.launch(process.env.COMPOSITOR_EXECUTABLE ? {executablePath:process.env.COMPOSITOR_EXECUTABLE,args,env} : {args:[path.join(__dirname,'..'),...args],env});
-  page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));await expect(page.locator('#startup-screen')).toBeHidden();await expect(page.locator('#layer-count')).toHaveText('1 个图层');
+  page=await app.firstWindow();page.on('pageerror',e=>errors.push(e.message));await expect(page.locator('#startup-screen')).toBeHidden();await expect(page.locator('#home-screen')).toBeVisible();await command('new');await page.locator('[data-category=web]').click();await page.locator('[data-preset=web-1280]').click();await page.locator('#new-background').selectOption('transparent');await page.locator('#create-document').click();await expect(page.locator('#new-dialog')).toBeHidden();await expect(page.locator('#layer-count')).toHaveText('1 个图层');
 });
 test.afterEach(async()=>{if(app){await app.evaluate(({app})=>app.exit(0));await app.close();}expect(errors).toEqual([]);});
 async function command(action){await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');const s=await page.evaluate(()=>Number(document.body.dataset.commandSerial||0));await app.evaluate(({BrowserWindow},v)=>BrowserWindow.getAllWindows()[0].webContents.send('command',v),action);await page.waitForFunction(v=>Number(document.body.dataset.commandSerial||0)>v,s);await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false'||!!document.querySelector('dialog[open]'));}
@@ -57,13 +57,13 @@ test('转换报告默认提供保留图层，复杂 PSD 在界面仍打开为多
   await app.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},file);await command('open');await expect(page.locator('[data-psd-choice=layers]')).toBeVisible();await page.locator('[data-psd-choice=layers]').click();await expect(page.locator('#layer-count')).toHaveText('2 个图层');await expect(page.locator('.layer-name span')).toHaveText(['复杂混合','底层']);
 });
 
-test('移动吸附到图层与画布，显示真实间距，Alt 绕过、关闭、取消及撤销',async()=>{
+test('移动吸附到图层与画布，显示真实间距，Ctrl 绕过、关闭、取消及撤销',async()=>{
   await shape();await page.locator('[data-tool=rect]').click();await drag(320,300,420,400);await page.locator('[data-tool=move]').click();
   const a=await point(350,330),b=await point(135,331);await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y,{steps:8});
   await expect(page.locator('#smart-guides')).toBeVisible();await expect(page.locator('#smart-guides [data-distance="100"]')).toBeVisible();await expect(page.locator('#status')).toContainText('已吸附');
   await page.screenshot({path:path.join(__dirname,'..','snap-preview.png')});await page.mouse.up();await expect(page.locator('#smart-guides')).toBeHidden();await expect(page.locator('#layer-x')).toHaveValue('-220');
   await command('undo');await expect(page.locator('#layer-x')).toHaveValue('0');await command('redo');await expect(page.locator('#layer-x')).toHaveValue('-220');
-  await command('undo');await page.keyboard.down('Alt');await drag(350,330,135,331);await page.keyboard.up('Alt');await expect(page.locator('#layer-x')).toHaveValue('-215');
+  await command('undo');await page.keyboard.down('Control');await drag(350,330,135,331);await page.keyboard.up('Control');await expect(page.locator('#layer-x')).toHaveValue('-215');
   await command('undo');await page.locator('#snap-enabled').uncheck();await drag(350,330,135,331);await expect(page.locator('#layer-x')).toHaveValue('-215');await command('undo');await page.locator('#snap-enabled').check();
   const file=test.info().outputPath('snap.ccomp');await save(file);const before=await image();await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y);await page.keyboard.press('Escape');await page.mouse.up();await expect(page.locator('#smart-guides')).toBeHidden();await expect(page.locator('#dirty-dot')).toBeHidden();expect(await image()).toBe(before);
   await drag(350,330,619,331);await expect(page.locator('#layer-x')).toHaveValue('270');await save(file);const saved=JSON.parse(await fs.readFile(file,'utf8'));expect(saved.layers[2].x+370).toBe(640);

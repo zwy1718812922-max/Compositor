@@ -88,7 +88,7 @@ export function setupNewDocument(onCreate) {
     if (![width, height, ppi].every(n => Number.isFinite(n) && n > 0) || ppi < 1 || ppi > 9600) throw new Error('请输入有效的宽度、高度和分辨率（1–9600 ppi）。');
     if (pixelWidth < 1 || pixelHeight < 1 || pixelWidth > 16384 || pixelHeight > 16384 || pixelWidth * pixelHeight > 64 * 1024 * 1024) throw new Error('画布每边需为 1–16384 像素，总像素不可超过 6400 万。请减小尺寸或分辨率。');
     return {
-      width: pixelWidth, height: pixelHeight, resolution: ppi,
+      width: pixelWidth, height: pixelHeight, resolution: ppi,colorMode:$('new-color-mode').value,
       background: $('new-background').value === 'custom' ? $('new-background-color').value : $('new-background').value,
       title: $('new-name').value.trim() || '未标题-' + sequence,
       preset: { width, height, unit, resolution: ppi }
@@ -203,6 +203,7 @@ export function setupNewDocument(onCreate) {
     update();
   };
   $('new-background-color').oninput = () => { $('new-background').value = 'custom'; update(); };
+  $('new-color-mode').onchange=()=>{const cmyk=$('new-color-mode').value==='CMYK';$('new-profile-import').hidden=!cmyk;$('new-color-profile').replaceChildren(new Option(cmyk?'Windows SWOP（CMYK）':'工作中的 RGB: sRGB IEC61966-2.1'));};
   $('preset-search').oninput = renderPresets; $('search-presets').onclick = renderPresets;
   $('preset-search').onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); renderPresets(); } };
   $('save-preset').onclick = () => {
@@ -217,14 +218,14 @@ export function setupNewDocument(onCreate) {
   $('delete-preset').onclick = () => {
     store.saved = store.saved.filter(item => item.id !== selected); selected = null; persist(); chooseCategory('saved'); update();
   };
-  $('new-form').onsubmit = event => {
-    event.preventDefault();
+  $('new-form').onsubmit = async event => {
+    event.preventDefault();if($('create-document').disabled)return;$('create-document').disabled=true;
     try {
-      const p = settings(); onCreate(p);
+      const p = settings();await onCreate(p);
       const item = { ...p.preset, id: 'recent-' + crypto.randomUUID(), name: p.title, background: p.background };
       store.recent = [item, ...store.recent.filter(old => old.width !== item.width || old.height !== item.height || old.unit !== item.unit || old.resolution !== item.resolution || old.background !== item.background)].slice(0, 10);
       persist(); sequence++; $('new-dialog').close();
-    } catch (error) { $('new-error').textContent = error.message; $('new-error').hidden = false; }
+    } catch (error) { $('new-error').textContent = error.message; $('new-error').hidden = false; }finally{$('create-document').disabled=false;}
   };
   chooseCategory('print');
   return {

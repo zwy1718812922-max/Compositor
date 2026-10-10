@@ -21,3 +21,7 @@ input[type=number] { touch-action:none; }
 aside:has(#properties-panel:not([hidden]) #text-properties:not([hidden])) .brush-panel{display:none}.inspector:has(#properties-panel:not([hidden]) #text-properties:not([hidden])){height:min(560px,calc(100vh - 285px))}
 
 .no-document .ruler-corner{visibility:hidden}
+#fill-dialog::backdrop,#blur-dialog::backdrop{background:transparent}
+#selection-options{display:flex;align-items:center;gap:10px;white-space:nowrap;font-size:11px}#selection-options input[type=number]{width:48px}#selection-options label{gap:4px}.selection-menu{width:200px;z-index:30}.selection-menu button{display:block;width:100%;text-align:left;padding:6px 10px}
+
+#fill-dialog,#blur-dialog{box-shadow:none}

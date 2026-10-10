@@ -11,7 +11,7 @@ test.beforeEach(async () => {
     : { args: [path.join(__dirname, '..'), profile], env });
   page = await app.firstWindow(); errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await expect(page.locator('#layer-count')).toHaveText('1 个图层');
+  await expect(page.locator('#home-screen')).toBeVisible();await menu('new');await page.locator('#new-name').fill('未命名');await page.locator('[data-category=web]').click();await page.locator('[data-preset=web-1280]').click();await page.locator('#new-background').selectOption('transparent');await page.locator('#create-document').click();await expect(page.locator('#new-dialog')).toBeHidden();await expect(page.locator('#layer-count')).toHaveText('1 个图层');
 });
 test.afterEach(async () => {
   if (app) { await app.evaluate(({ app }) => app.exit(0)); await app.close(); }
@@ -96,7 +96,7 @@ test('中文文字、图层排序、透明度、保存打开与 PNG/JPEG 实际�
 });
 test('取消操作保留未保存修改，导入图片、变换、重命名和错误项目恢复', async () => {
   await menu('addLayer'); await expect(page.locator('#layer-count')).toHaveText('2 个图层');
-  await menu('new'); await expect(page.locator('#confirm-dialog')).toBeVisible(); await page.locator('[data-choice=cancel]').click();
+  await menu('closeDocument'); await expect(page.locator('#confirm-dialog')).toBeVisible(); await page.locator('[data-choice=cancel]').click();
   await expect(page.locator('#layer-count')).toHaveText('2 个图层');
   const imagePath = test.info().outputPath('导入.png');
   const data = await page.evaluate(() => { const c = document.createElement('canvas'); c.width = 100; c.height = 80; const ctx = c.getContext('2d'); ctx.fillStyle = '#ff0000'; ctx.fillRect(0, 0, 100, 80); return c.toDataURL().split(',')[1]; });
@@ -112,7 +112,7 @@ test('取消操作保留未保存修改，导入图片、变换、重命名和�
   await expect(page.locator('.layer-row.active .layer-name span')).toHaveText('我的照片');
   const bad = test.info().outputPath('损坏.ccomp'); await fs.writeFile(bad, '{"format":"bad"}');
   await app.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }); }, bad);
-  await menu('open'); await page.locator('[data-choice=discard]').click();
+  await menu('open');
   await expect(page.locator('#toast')).toContainText('不支持');
   await expect(page.locator('#layer-count')).toHaveText('3 个图层');
   expect(await pixel(150, 150)).toEqual([255, 0, 0, 255]);
@@ -145,7 +145,7 @@ test('关闭保护、另存为取消与新建后的保存路径隔离', async ()
 });
 
 test('纸张预设、单位和方向转换、保存预设、真实创建及分辨率导出', async () => {
-  await menu('new');
+  await menu('new');await page.locator('[data-category=print]').click();
   await expect(page.locator('.preset-card')).toHaveCount(14);
   await page.locator('[data-preset=a4]').click();
   await expect(page.locator('#new-size-preview')).toHaveText('2480 × 3508 像素 · 300 ppi');
@@ -172,7 +172,7 @@ test('纸张预设、单位和方向转换、保存预设、真实创建及分�
   await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, file);
   await menu('save'); await expect(page.locator('#document-name')).toHaveText('打印项目');
   const saved = JSON.parse(await fs.readFile(file, 'utf8'));
-  expect(saved.version).toBe(5); expect(saved.resolution).toBe(300); expect(saved.colorSpace).toBe('sRGB');
+  expect(saved.version).toBe(6); expect(saved.resolution).toBe(300); expect(saved.colorSpace).toBe('sRGB');
   for (const format of ['png', 'jpeg']) {
     const output = test.info().outputPath('300ppi.' + format);
     await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, output);
@@ -187,14 +187,14 @@ test('纸张预设、单位和方向转换、保存预设、真实创建及分�
     } else { expect(image[13]).toBe(1); expect(image.readUInt16BE(14)).toBe(300); expect(image.readUInt16BE(16)).toBe(300); }
   }
   await menu('new'); await page.locator('[data-category=recent]').click();
-  await expect(page.locator('.preset-card')).toHaveCount(1);
-  await expect(page.locator('.preset-title')).toHaveText('A4 中文设计');
+  await expect(page.locator('.preset-card')).toHaveCount(2);
+  await expect(page.locator('.preset-title').first()).toHaveText('A4 中文设计');
   await page.locator('[data-category=saved]').click(); await page.locator('#delete-preset').click();
   await expect(page.locator('#preset-empty')).toBeVisible();
 });
 
 test('搜索、A3 300ppi 预设和无效输入不会创建画布', async () => {
-  await menu('new'); await page.locator('#preset-search').fill('A3');
+  await menu('new');await page.locator('[data-category=print]').click(); await page.locator('#preset-search').fill('A3');
   await expect(page.locator('.preset-card')).toHaveCount(1);
   await page.locator('#preset-search').press('Enter');
   await expect(page.locator('#new-dialog')).toBeVisible();
@@ -220,7 +220,7 @@ test('搜索、A3 300ppi 预设和无效输入不会创建画布', async () => {
 
 test('参考图布局、纸张选择和最小窗口的创建按钮可见', async () => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await menu('new'); await page.locator('[data-preset=letter]').click();
+  await menu('new');await page.locator('[data-category=print]').click();await page.locator('[data-preset=letter]').click();
   await page.evaluate(() => document.activeElement.blur());
   await page.mouse.move(0, 0);
   const dialog = page.locator('#new-dialog');
@@ -409,7 +409,7 @@ test('真实 PSD 打开、分组蒙版剪贴渲染、导出重开与独立解码
   await menu('export'); await page.locator('#export-format').selectOption('psd'); await page.locator('#export-form button[type=submit]').click(); await expect(page.locator('#export-dialog')).not.toBeVisible();
   const { readPsdDocument } = require('../psd.cjs'), parsed = readPsdDocument(await fs.readFile(output)); expect(parsed.project.layers.map(l => l.name)).toEqual(['背景','蒙版图层','剪贴颜色','中文组']);
   await app.evaluate(({ dialog }, target) => { dialog.showOpenDialog = async () => ({ canceled:false, filePaths:[target] }); },output);
-  await menu('open'); await page.locator('#confirm-dialog [data-choice=discard]').click(); await expect(page.locator('#tab-name')).toHaveText('导出');
+  await menu('open'); await expect(page.locator('#tab-name')).toHaveText('导出');
   expect(await pixel(2,2)).toEqual([240,210,20,255]); expect(await pixel(5,2)).toEqual([25,50,90,255]);
 });
 
@@ -435,7 +435,7 @@ test('默认分组选择当前图层，组与蒙版随画布裁剪和重采样�
   expect(child.name).toBe('矩形'); expect([group.x,group.y,group.scale,group.rotation]).toEqual([0,0,1,0]); expect([child.mask.x,child.mask.y]).toEqual([50,50]);
   await page.locator('.layer-row.active .disclosure').click(); await expect(page.locator('.layer-row')).toHaveCount(2); await page.locator('.layer-row.active .disclosure').click(); await expect(page.locator('.layer-row')).toHaveCount(3);
   const before = await page.locator('#canvas').evaluate(c => c.toDataURL()); await app.evaluate(({ dialog }, target) => { dialog.showOpenDialog = async () => ({ canceled:false,filePaths:[target] }); },file);
-  await menu('open'); await page.locator('#confirm-dialog [data-choice=discard]').click(); await expect(page.locator('#confirm-dialog')).not.toBeVisible(); await expect(page.locator('#tab-name')).toHaveText('尺寸与层级');
+  await menu('open'); await expect(page.locator('#confirm-dialog')).not.toBeVisible(); await expect(page.locator('#tab-name')).toHaveText('尺寸与层级');
   expect(await page.locator('#canvas').evaluate(c => c.toDataURL())).toBe(before);
 });
 

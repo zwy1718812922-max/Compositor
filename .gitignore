@@ -28,6 +28,7 @@ node_modules/
 /test-results/
 windows/test-results/
 windows/playwright-report/
+windows/src/vendor/lcms/
 
 # Generated validation artifacts and screenshots (scripts reproduce these)
 windows/validation/

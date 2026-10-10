@@ -47,7 +47,7 @@ internal sealed class EditorWindow : Form {
     static bool Flag(object value) { return value is bool && (bool)value; }
     static double Number(object value) { return Convert.ToDouble(value); }
     public EditorWindow() {
-        Text="Compositor 中文版 0.6.0"; ClientSize=new Size(1440,960);MinimumSize=new Size(1024,720);StartPosition=FormStartPosition.CenterScreen;
+        Text="Compositor 中文版 0.7.0"; ClientSize=new Size(1440,960);MinimumSize=new Size(1024,720);StartPosition=FormStartPosition.CenterScreen;
         FormBorderStyle=FormBorderStyle.None;BackColor=Color.FromArgb(38,38,38);Padding=new Padding(1);AutoScaleMode=AutoScaleMode.Dpi;
         MaximizedBounds=Screen.FromControl(this).WorkingArea;var icon=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"assets","icon.ico");if(File.Exists(icon))Icon=new Icon(icon);
         web.Dock=DockStyle.Fill;web.DefaultBackgroundColor=BackColor;Controls.Add(web);Controls.Add(splash);splash.BringToFront();
@@ -95,19 +95,20 @@ internal sealed class EditorWindow : Form {
             case "ai:cancel":return ai!=null&&ai.Cancel();
             case "ai:run":if(ai==null)ai=new AiService(AppDomain.CurrentDomain.BaseDirectory,Environment.GetEnvironmentVariable("COMPOSITOR_AI_ROOT")??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"CompositorZH","AI"),data=>{if(!IsDisposed)BeginInvoke(new Action(()=>web.CoreWebView2.PostWebMessageAsJson(Json().Serialize(new {aiProgress=data}))));});return await ai.Run(p);
             case "fonts:list":return await Task.Run(()=>FontCatalog.Read());
+            case "color:profile":{var file=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"System32","spool","drivers","color","RSWOP.icm");if(StringValue(payload)=="custom")file=OpenPath("CMYK ICC 配置文件|*.icc;*.icm");if(file==null)return null;var b=await Task.Run(()=>ReadBytes(file));if(b.Length<128||b.Length>4*1024*1024||Encoding.ASCII.GetString(b,36,4)!="acsp"||Encoding.ASCII.GetString(b,16,4)!="CMYK")throw new Exception("请选择 CMYK ICC 配置文件。");return Convert.ToBase64String(b);}
             case "renderer:ready":splash.Hide();splash.Dispose();return true;
             case "document:dirty":dirty=Flag(payload);return true;
-            case "document:commit":currentPath=StringValue(payload)=="open"?pendingPath:null;pendingPath=null;return true;
+            case "document:commit":currentPath=Get(p,"kind")!=null?StringValue(Get(p,"path")):StringValue(payload)=="open"?pendingPath:null;if(String.IsNullOrEmpty(currentPath))currentPath=null;pendingPath=null;return true;
             case "document:close":if(!dirty)Close();return true;
             case "window:drag":ReleaseCapture();SendMessage(Handle,0xA1,(IntPtr)2,IntPtr.Zero);return true;
             case "window:action":switch(StringValue(payload)){case "minimize":WindowState=FormWindowState.Minimized;break;case "maximize":WindowState=WindowState==FormWindowState.Maximized?FormWindowState.Normal:FormWindowState.Maximized;break;case "close":Close();break;default:throw new Exception("未知窗口操作。");}return true;
             case "project:open": {
-                var file=OpenPath("项目和 Photoshop 文件|*.ccomp;*.psd|Compositor 项目|*.ccomp|Photoshop PSD|*.psd");if(file==null)return null;
+                var file=StringValue(payload);if(!String.IsNullOrEmpty(file)){if(!Path.IsPathRooted(file)||(!String.Equals(Path.GetExtension(file),".ccomp",StringComparison.OrdinalIgnoreCase)&&!String.Equals(Path.GetExtension(file),".psd",StringComparison.OrdinalIgnoreCase)))throw new Exception("最近项目路径无效。");}else file=OpenPath("项目和 Photoshop 文件|*.ccomp;*.psd|Compositor 项目|*.ccomp|Photoshop PSD|*.psd");if(file==null)return null;
                 var bytes=await Task.Run(()=>ReadBytes(file));var name=Path.GetFileNameWithoutExtension(file);if(Path.GetExtension(file).ToLowerInvariant()==".psd"){pendingPath=null;return new {source="psd",path=file,name,data=Convert.ToBase64String(bytes)};}
                 var project=Json().DeserializeObject(Encoding.UTF8.GetString(bytes));pendingPath=file;return new {project,path=file,name};
             }
             case "project:save": {
-                var project=Object(Get(p,"project"));if(Field(project,"format")!="com.compositor.windows"||Number(Get(project,"version"))<1||Number(Get(project,"version"))>5)throw new Exception("项目格式无效。");
+                var project=Object(Get(p,"project"));if(Field(project,"format")!="com.compositor.windows"||Number(Get(project,"version"))<1||Number(Get(project,"version"))>6)throw new Exception("项目格式无效。");
                 var file=currentPath;if(file==null||Flag(Get(p,"saveAs")))file=SavePath("Compositor 项目|*.ccomp",file??"未命名.ccomp");if(file==null)return null;
                 var bytes=Encoding.UTF8.GetBytes(Json().Serialize(project));await Task.Run(()=>AtomicWrite(file,bytes));currentPath=file;return new {path=file,name=Path.GetFileNameWithoutExtension(file)};
             }

@@ -51,5 +51,5 @@ export function preparePsd(project) {
     }
     return converted;
   });
-  return { project: output, composite: composite(project).toDataURL('image/png') };
+  return { project: output, composite: composite(project,null,false).toDataURL('image/png') };
 }

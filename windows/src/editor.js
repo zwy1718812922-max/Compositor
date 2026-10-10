@@ -1,4 +1,5 @@
 import { affine, inverse, multiply, vector, decompose } from './affine.mjs';
+import { colorProfile,proofPixels } from './color-engine.mjs';
 import { childrenOf, ancestors, isVisible } from './layer-tree.js';
 import { fillSurface, applyAdjustment } from './fill-renderer.js';
 import { applyEffects } from './effects.js';
@@ -164,16 +165,17 @@ function renderSiblings(ctx, project, parentId = null) {
     ctx.save(); ctx.globalAlpha = l.opacity; ctx.globalCompositeOperation = l.blend === 'pass-through' ? 'source-over' : l.blend; ctx.drawImage(pixels, 0, 0); ctx.restore();
   }
 }
-export function composite(project, background) {
+export function composite(project, background, proof=true) {
   const result = canvas(project.width, project.height);
-  renderInto(result, project, background);
+  renderInto(result, project, background,proof);
   return result;
 }
-export function renderInto(target, project, background) {
+export function renderInto(target, project, background,proof=true) {
   const ctx = target.getContext('2d');
   ctx.clearRect(0, 0, target.width, target.height);
   if (background) { ctx.fillStyle = background; ctx.fillRect(0, 0, target.width, target.height); }
   renderSiblings(ctx, project);
+  if(proof&&project.colorMode==='CMYK'){const profile=colorProfile(project.colorProfile?.data);if(profile)ctx.putImageData(proofPixels(ctx.getImageData(0,0,target.width,target.height),profile),0,0);}
 }
 export function hitLayer(project, point) {
   const pixel = canvas(1, 1), ctx = pixel.getContext('2d');
@@ -194,7 +196,7 @@ export function hitLayer(project, point) {
 }
 export function serialize(project) {
   return {
-    format: 'com.compositor.windows', version: 5, guides:(project.guides || []).map(g=>({...g})), ruler:structuredClone(project.ruler || {unit:'px',origin:{x:0,y:0},visible:true,guidesVisible:true,locked:false}), width: project.width, height: project.height, resolution: project.resolution ?? 72, colorSpace: 'sRGB', activeId: project.activeId,
+    format: 'com.compositor.windows', version: 6,colorMode:project.colorMode||'RGB',...(project.colorProfile?{colorProfile:structuredClone(project.colorProfile)}:{}), guides:(project.guides || []).map(g=>({...g})), ruler:structuredClone(project.ruler || {unit:'px',origin:{x:0,y:0},visible:true,guidesVisible:true,locked:false}), width: project.width, height: project.height, resolution: project.resolution ?? 72, colorSpace: 'sRGB', activeId: project.activeId,
     layers: project.layers.map(layer => {
       const { canvas: pixels, mask, _bounds, _fill, _pattern, ...metadata } = layer;
       const output = pixels ? { ...structuredClone(metadata), data: layer.data || pixels.toDataURL('image/png') } : structuredClone(metadata);
@@ -228,7 +230,7 @@ export async function deserialize(data) {
       layers.at(-1).mask = { ...layer.mask, canvas: pixels };
     }
   }
-  return { width: data.width, height: data.height, resolution: data.resolution ?? 72, colorSpace: 'sRGB', activeId: data.activeId, guides:data.guides || [], ruler:data.ruler || {unit:'px',origin:{x:0,y:0},visible:true,guidesVisible:true,locked:false}, layers };
+  return { width: data.width, height: data.height, resolution: data.resolution ?? 72, colorSpace: 'sRGB',colorMode:data.colorMode||'RGB',colorProfile:data.colorProfile, activeId: data.activeId, guides:data.guides || [], ruler:data.ruler || {unit:'px',origin:{x:0,y:0},visible:true,guidesVisible:true,locked:false}, layers };
 }
 export class History {
   constructor() { this.reset(); }

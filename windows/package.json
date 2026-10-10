@@ -1,6 +1,6 @@
 {
   "name": "compositor-windows-zh",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Compositor 中文 Windows 桌面版",
   "author": "Compositor contributors",
   "license": "MIT",
@@ -12,14 +12,19 @@
     "dist": "electron-builder --win portable nsis",
     "build:lite": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native.ps1",
     "dist:lite": "npm run build:lite && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-native.ps1",
-    "test:lite": "node scripts/native-smoke.cjs"
+    "test:lite": "node scripts/native-smoke.cjs",
+    "prestart": "node scripts/sync-color-engine.cjs",
+    "pretest": "node scripts/sync-color-engine.cjs",
+    "prepack": "node scripts/sync-color-engine.cjs",
+    "predist": "node scripts/sync-color-engine.cjs"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",
     "buffer": "6.0.3",
     "electron": "44.7.0",
     "electron-builder": "26.15.3",
-    "esbuild": "0.25.6"
+    "esbuild": "0.25.6",
+    "lcms-wasm": "1.0.5"
   },
   "build": {
     "appId": "com.compositor.windows.zh",
@@ -42,7 +47,8 @@
       "native/fonts.ps1",
       "ai/**/*",
       "ai-service.cjs",
-      "psd-adjustments.cjs"
+      "psd-adjustments.cjs",
+      "cmyk-psd.cjs"
     ],
     "win": {
       "target": [

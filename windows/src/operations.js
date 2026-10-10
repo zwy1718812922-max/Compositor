@@ -1,4 +1,6 @@
 import { canvas, bounds, drawLayer, localPoint, textFont, textLines, transformPoint, MAX_PIXELS } from './editor.js';
+import {selectionPath} from './selections.js';
+import {affine,inverse} from './affine.mjs';
 
 export function rectangle(start, end) {
   const x = Math.floor(Math.min(start.x, end.x)), y = Math.floor(Math.min(start.y, end.y));
@@ -7,6 +9,7 @@ export function rectangle(start, end) {
 
 export function clipSelection(ctx, layer, selection) {
   if (!selection) return;
+  if(selection.canvas){const transform=ctx.getTransform(),origin=localPoint(layer,{x:0,y:0});ctx.transform(...inverse(affine(layer)),origin.x,origin.y);ctx.clip(selectionPath(selection));ctx.setTransform(transform);return;}
   const { x, y, width, height } = selection;
   const points = [{ x, y }, { x: x + width, y }, { x: x + width, y: y + height }, { x, y: y + height }].map(p => localPoint(layer, p));
   ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);

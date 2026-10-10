@@ -6,7 +6,8 @@
 
 - `main`：已经交付的 Windows 0.4.0 基线。
 - `windows-v0.4.0`：标记此次基线，方便比较和恢复旧版源码。
-- `codex/windows-advanced`：继续处理 PSD 分层、变换控件、启动、包体积、文字和 FX 图层样式。
+- `codex/windows-advanced`：Windows 功能开发分支，包含 PSD、变换、文字、FX、NPU 抠图、多文档和 ICC CMYK。
+- `windows-v0.5.0`、`windows-v0.6.0`、`windows-v0.7.0`：对应后续本地交付，安装包由各版本源码重建。
 
 该基线是本地快照提交，不是重新创建的上游历史。快照来源为原项目提交 `22c7b8d5b23bb1e27a5746912061b23757c4f554`，其原有许可证保留。已登记只用于获取原项目更新的远程 `upstream`：
 

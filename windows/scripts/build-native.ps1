@@ -1,6 +1,8 @@
 ﻿param([string]$WebView2Package = "$env:USERPROFILE\.nuget\packages\microsoft.web.webview2\1.0.3179.45")
 $ErrorActionPreference = 'Stop'
 $windowsRoot = Split-Path -Parent $PSScriptRoot
+node (Join-Path $PSScriptRoot 'sync-color-engine.cjs')
+if ($LASTEXITCODE -ne 0) { throw 'Color engine preparation failed' }
 $outputRoot = Join-Path $windowsRoot 'dist\lite-unpacked'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $sdkPath = (Resolve-Path -LiteralPath $WebView2Package).Path

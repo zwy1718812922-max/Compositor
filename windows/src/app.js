@@ -1,4 +1,9 @@
 import { affine, inverse } from './affine.mjs';
+import { setupColors, rememberColor } from './colors.js';
+import { setupWorkspace } from './workspace.js';
+import { initColorProfile } from './color-engine.mjs';
+import { setupBlur } from './blur.js';
+import { setupSelections,selectionPath,selectionOutline } from './selections.js';
 import { setupNumericScrubbing } from './numeric-scrubber.js';
 import { setupBrushCursor } from './brush-cursor.js';
 import { setupCutout } from './cutout.js';
@@ -22,10 +27,10 @@ const api = window.desktop;
 let project, name = '未命名', dirty = false, tool = 'move', busy = false, space = false, gesture = null;
 let zoom = 1, pan = { x: 0, y: 0 }, toastTimer;
 let selection = null, cropRect = null, sizeMode = 'image', adjustment = null, adjustmentFrame = null;
-const history = new History();
+let history = new History(),workspace,path=null,sourcePath=null;
 let editTarget = 'image'; const selectedIds = new Set();
 let savedColors = null;
-let typeEditor, transformUI, snapping, fonts, brushCursor, rulers, numericTransaction=null, documentOpen=true;
+let typeEditor, transformUI, snapping, fonts, brushCursor, rulers,selections, numericTransaction=null, documentOpen=true, transformSelected=true;
 const editSurface = () => editTarget === 'mask' && active().mask ? active().mask : active();
 function setTarget(target) {
   if (target === 'mask' && active().mask) {
@@ -38,13 +43,14 @@ function setTarget(target) {
   editTarget = target; colorSwatches();
 }
 function selectLayer(layer, target = 'image', multiple = false) {
+  transformSelected=true;
   if (typeEditor?.editing && !typeEditor.owns(layer)) typeEditor.finish();
   if (!multiple) selectedIds.clear();
   if (multiple && selectedIds.has(layer.id) && selectedIds.size > 1) selectedIds.delete(layer.id); else selectedIds.add(layer.id);
   project.activeId = selectedIds.has(layer.id) ? layer.id : [...selectedIds].at(-1); setTarget(target); refresh(false); drawOverlay();
 }
 const viewport = $('viewport'), display = $('canvas'), overlay = $('overlay');
-const toolNames = { move: '移动工具', select: '矩形选区工具', crop: '裁剪工具', gradient: '渐变工具', brush: '画笔工具', eraser: '橡皮擦工具', text: '文字工具', rect: '矩形工具', ellipse: '椭圆工具', eyedropper: '吸管工具', hand: '抓手工具' };
+const toolNames = { move: '移动工具', select: '矩形选区工具',objectSelect:'对象选择工具',quickSelect:'快速选择工具',wand:'魔棒工具', crop: '裁剪工具', gradient: '渐变工具', brush: '画笔工具', eraser: '橡皮擦工具', text: '文字工具', rect: '矩形工具', ellipse: '椭圆工具', eyedropper: '吸管工具', hand: '抓手工具' };
 const active = () => project.layers.find(layer => layer.id === project.activeId);
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 function setBusy(value) {
@@ -56,11 +62,12 @@ function toast(message) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 5500);
   $('status').textContent = message;
 }
-function setDirty(value) { dirty = value; api.setDirty(value); updateTitle(); }
+function setDirty(value) { dirty = value; updateTitle();api.setDirty(workspace?workspace.hasDirty():value); }
 function updateTitle() {
   $('document-name').textContent = name; $('tab-name').textContent = name;
   $('dirty-dot').hidden = !dirty;
   document.title = (dirty ? '● ' : '') + name + ' — Compositor 中文版';
+  workspace?.capture();workspace?.render();
 }
 function snapshot() {
   for (const layer of project.layers) for (const item of [layer, layer.mask]) if (item?.canvas && !item.data) item.data = item.canvas.toDataURL('image/png');
@@ -75,18 +82,20 @@ function capacity(width = 0, height = 0, count = 1) {
   const pixels = project.layers.reduce((sum, l) => sum + pixelCount(l), 0);
   if (project.layers.length + count > 100 || pixels + width * height > MAX_PIXELS) throw new Error('已达到图层内存限制（100 层 / 6400 万像素），请删除一些图层。');
 }
-function newProject(width, height, background, title, resolution = 72) {
+function newProject(width, height, background, title, resolution = 72, register=true,colorMode='RGB',profile) {
+  if(register)workspace?.beginNew();
   documentOpen=true;document.body.classList.remove('no-document');
   const layer = rasterLayer('背景', width, height, background);
-  project = { width, height, resolution, colorSpace: 'sRGB', layers: [layer], activeId: layer.id };
+  project = { width, height, resolution, colorSpace: 'sRGB',colorMode,...(profile?{colorProfile:profile}:{}), layers: [layer], activeId: layer.id };
   selection = cropRect = null; selectedIds.clear(); selectedIds.add(layer.id); setTarget('image');
-  name = title || '未命名'; history.reset(); api.commitDocument('new');
+  name = title || '未命名'; history=new History();path=sourcePath=null;transformSelected=true;api.commitDocument({kind:'activate',path:null});
   resizeCanvas(); setDirty(false); fit(); render(); refresh();
+  if(register)workspace?.add();
 }
 function resizeCanvas() {
   for (const c of [display, overlay]) { c.width = project.width; c.height = project.height; }
   $('canvas-wrap').style.width = project.width + 'px'; $('canvas-wrap').style.height = project.height + 'px';
-  $('dimensions').textContent = project.width + ' × ' + project.height + ' px · ' + Math.round(project.resolution) + ' ppi';
+  $('dimensions').textContent = project.width + ' × ' + project.height + ' px · ' + Math.round(project.resolution) + ' ppi · '+(project.colorMode||'RGB');
   $('tab-size').textContent = project.width + ' × ' + project.height;
 }
 function applyView() {
@@ -104,7 +113,7 @@ function setZoom(value, center = { x: viewport.clientWidth / 2, y: viewport.clie
   pan = { x: center.x - (center.x - pan.x) * factor, y: center.y - (center.y - pan.y) * factor };
   zoom = next; applyView();
 }
-function render() { if(!documentOpen)return;rulers?.update(); renderInto(display, project); drawOverlay(); typeEditor?.update(); }
+function render() { if(!documentOpen||workspace?.isHome())return;rulers?.update(); renderInto(display, project); drawOverlay(); typeEditor?.update(); }
 function drawOverlay() {
   const ctx = overlay.getContext('2d'); ctx.clearRect(0, 0, overlay.width, overlay.height);
   const layer = active();
@@ -114,17 +123,19 @@ function drawOverlay() {
   if (rect) {
     ctx.save();
     if (cropRect) { ctx.fillStyle = '#0008'; ctx.beginPath(); ctx.rect(0, 0, project.width, project.height); ctx.rect(rect.x, rect.y, rect.width, rect.height); ctx.fill('evenodd'); }
-    ctx.lineWidth = 1 / zoom; ctx.strokeStyle = '#fff'; ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
-    ctx.strokeStyle = '#10151f'; ctx.setLineDash([5 / zoom, 5 / zoom]); ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.lineWidth = 1 / zoom; ctx.strokeStyle = '#fff';if(rect.canvas&&!cropRect)ctx.stroke(selectionOutline(rect));else ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.strokeStyle = '#10151f'; ctx.setLineDash([5 / zoom, 5 / zoom]);if(rect.canvas&&!cropRect)ctx.stroke(selectionOutline(rect));else ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
     ctx.restore();
   }
   $('apply-crop').disabled = !rect; $('deselect').disabled = !rect;
   $('selection-size').textContent = rect ? rect.width + ' × ' + rect.height : '';
 }
 function setTool(next) {
+  if(['move','text'].includes(next))transformSelected=true;
   if (next !== tool && typeEditor?.editing) typeEditor.finish();
   if (next !== 'crop') cropRect = null;
   tool = next;brushCursor?.update(); $('tool-name').textContent = toolNames[tool];
+  selections?.update(tool);
   $('move-options').hidden = tool !== 'move'; $('text-options').hidden = tool !== 'text';
   $('type-options').hidden = tool !== 'text';
   if (tool === 'text' && active().type !== 'text') $('type-color').value = $('color').value;
@@ -134,7 +145,7 @@ function setTool(next) {
   $('gradient-color-option').hidden = tool !== 'gradient';
   document.querySelectorAll('[data-tool]').forEach(button => { button.classList.toggle('selected', button.dataset.tool === tool); button.setAttribute('aria-pressed', String(button.dataset.tool === tool)); });
   viewport.style.cursor = ['move', 'hand', 'text'].includes(tool) ? { move: 'default', hand: 'grab', text: 'text' }[tool] : 'crosshair';
-  $('property-hint').textContent = ['brush', 'eraser'].includes(tool) ? '在选中的可见像素图层上绘画。文字请新建图层后绘画。' : tool === 'move' ? '拖动图层移动；拖动手柄等比缩放或旋转。Alt 围绕中心；Esc 取消拖动。' : tool === 'text' ? '单击创建点文字，拖出框创建段落文字；单击已有文字继续编辑。Ctrl+Enter 完成，Esc 取消。' : '选择图层后，可在这里修改它的属性。';
+  $('property-hint').textContent = ['brush', 'eraser'].includes(tool) ? '在选中的可见像素图层上绘画。文字请新建图层后绘画。' : tool === 'move' ? '拖动图层移动；拖动手柄自由缩放；Shift 等比。Alt 拖动复制 / 手柄中心缩放；Ctrl 暂停吸附；Esc 取消。' : tool === 'text' ? '单击创建点文字，拖出框创建段落文字；单击已有文字继续编辑。Ctrl+Enter 完成，Esc 取消。' : '选择图层后，可在这里修改它的属性。';
   drawOverlay();
 }
 function icon(name) { const img = document.createElement('img'); img.src = 'icons/' + name + '.svg'; img.alt = ''; return img; }
@@ -164,7 +175,7 @@ function thumbnail(item, mask = false) {
   return thumb;
 }
 function refresh(rebuild = true) {
-  if(!documentOpen)return;
+  if(!documentOpen||workspace?.isHome())return;
   const layer = active(), target = editSurface(), locked = isLocked(project, layer);
   $('layer-count').textContent = project.layers.length + ' 个图层';
   $('undo').disabled = history.undoStack.length === 0; $('redo').disabled = history.redoStack.length === 0;
@@ -228,7 +239,7 @@ async function result(promise) { const response = await promise; if (!response.o
 async function save(saveAs = false) {
   const output = await result(api.saveProject(snapshot(), saveAs));
   if (!output) return false;
-  name = output.name; setDirty(false); toast('项目已保存：' + output.path); return true;
+  name = output.name;path=output.path;setDirty(false);workspace?.remember(path);toast('项目已保存：' + output.path); return true;
 }
 async function mayReplace() {
   if (!dirty) return true;
@@ -318,11 +329,11 @@ async function mergeLayers(visible) {
   }
   canonicalize(project); project.activeId = layer.id; setTarget('image'); changed('已合并画布范围内的图层，可撤销恢复');
 }
-async function command(action) {
+async function command(action,file=null) {
   if (action === 'selectAll' && document.activeElement?.matches('input,textarea')) { document.activeElement.select(); return; }
   if (typeEditor?.editing && ['undo','redo'].includes(action) && document.activeElement?.matches('input,textarea')) { document.execCommand(action); return; }
   if (busy || gesture || document.querySelector('dialog[open]')) return;
-  if(!documentOpen&&!['new','open','close','help'].includes(action)&&!action.startsWith('panel'))return;
+  if((!documentOpen||workspace?.isHome())&&!['new','open','close','help'].includes(action)&&!action.startsWith('panel'))return;
   if (typeEditor?.editing) typeEditor.finish();
   // Commit a pending text change before a menu accelerator operates on it.
   if (document.activeElement?.matches('input,textarea,select')) document.activeElement.blur();
@@ -335,25 +346,27 @@ async function command(action) {
     if(rulers?.command(action))return;
     if(action==='createFill'){fillEditor.menu();return;}
     if (action === 'textTool') { setTool('text'); return; }
-    if (action === 'freeTransform') { setTool('move'); $('show-transform').checked = true; drawOverlay(); toast('拖动手柄自由缩放；Shift 等比 · Alt 中心变换 · Esc 取消'); return; }
-    if (action === 'new') { if (await mayReplace()) newDocument.open(); }
+    if (action === 'freeTransform') { transformSelected=true;setTool('move'); $('show-transform').checked = true; drawOverlay(); toast('拖动手柄自由缩放；Shift 等比 · Alt 中心变换 · Esc 取消'); return; }
+    if (action === 'new') { newDocument.open(); }
     else if (action === 'open') {
-      if (!await mayReplace()) return;
-      const opened = await result(api.openProject()); if (!opened) return;
+      const opened = await result(api.openProject(file)); if (!opened) return;
+      const already=workspace.findPath(opened.path);if(already){workspace.activate(already.id,true);toast('项目已在标签页中打开');return;}
       if (opened.requiresConversion) {
         const dialog = $('psd-warning-dialog'); $('psd-warning-text').textContent = opened.warnings.join('\n'); dialog.querySelector('[data-psd-choice="flatten"]').disabled = !opened.preview; dialog.returnValue = 'cancel'; dialog.showModal();
         const choice = await new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue), { once: true })); if (choice === 'cancel') return; if (choice === 'flatten') opened.project = opened.preview;
       }
-      const loaded = await deserialize(opened.project); documentOpen=true;document.body.classList.remove('no-document');project = loaded; name = opened.name; selection = cropRect = null;
+      if(opened.project.colorMode==='CMYK')await initColorProfile(opened.project.colorProfile.data);
+      const loaded = await deserialize(opened.project);workspace.beginNew();documentOpen=true;document.body.classList.remove('no-document');project = loaded; name = opened.name; selection = cropRect = null;path=opened.source==='psd'?null:opened.path;sourcePath=opened.path;history=new History();transformSelected=true;
       selectedIds.clear(); selectedIds.add(project.activeId); setTarget('image');
-      api.commitDocument(opened.source === 'psd' ? 'new' : 'open'); history.reset(); resizeCanvas(); setDirty(opened.source === 'psd'); fit(); render(); refresh(); $('canvas-tip').hidden = true; toast(opened.source === 'psd' ? 'PSD 已打开' + (opened.warnings.length ? '：' + opened.warnings.join('；') : '') : '项目已打开');
+      api.commitDocument({kind:'activate',path});resizeCanvas();dirty=opened.source==='psd';fit();render();refresh();workspace.add();setDirty(dirty);workspace.remember(opened.path);$('canvas-tip').hidden = true;toast(opened.source === 'psd' ? 'PSD 已打开' + (opened.warnings.length ? '：' + opened.warnings.join('；') : '') : '项目已打开');
     } else if (action === 'save' || action === 'saveAs') await save(action === 'saveAs');
     else if (action === 'import') await importImages(await result(api.importImages()));
     else if (action === 'export') $('export-dialog').showModal();
     else if (action === 'help') $('help-dialog').showModal();
     else if (action === 'imageSize' || action === 'canvasSize') openSize(action === 'imageSize' ? 'image' : 'canvas');
-    else if(action==='removeBackground'||action==='selectSubject')cutout.open();
+    else if(action==='removeBackground'||action==='selectSubject')cutout.open({mode:action==='selectSubject'?'selection':'mask'});
     else if (action === 'adjust') openAdjustment();
+    else if(action.startsWith('blur:'))blur.open(action.slice(5));
     else if (action === 'layerStyles') {if(active().type==='adjustment')toast('调整图层请先向下合并，再添加 FX。');else layerStyles.open();}
     else if (action === 'clearStyles') { if (!editable()) return; checkpoint(); delete active().styles; delete active().psdEffects; active().stylesModified = true; changed('已清除图层样式'); }
     else if (action === 'selectAll') { selection = { x: 0, y: 0, width: project.width, height: project.height }; cropRect = null; drawOverlay(); }
@@ -376,7 +389,7 @@ async function command(action) {
       checkpoint(); project.layers[project.layers.indexOf(old)] = next; changed('文字已栅格化，撤销可恢复可编辑文字');
     } else if (action === 'copyMerged') {
       const rect = selection || { x: 0, y: 0, width: project.width, height: project.height };
-      const copy = canvas(rect.width, rect.height); copy.getContext('2d').drawImage(display, -rect.x, -rect.y);
+      const copy = canvas(rect.width, rect.height); const ctx=copy.getContext('2d');ctx.drawImage(display, -rect.x, -rect.y);if(selection?.canvas){ctx.globalCompositeOperation='destination-in';ctx.drawImage(selection.canvas,0,0);}
       await result(api.copyImage(copy.toDataURL('image/png'))); toast('已将可见画面复制到 Windows 剪贴板');
     } else if (action === 'pasteImage') {
       const data = await result(api.pasteImage()); if (!data) { toast('剪贴板中没有图片。'); return; }
@@ -384,8 +397,8 @@ async function command(action) {
     } else if (action === 'undo' || action === 'redo') await travel(action === 'undo');
     else if (action === 'fit') fit();
     else if (action === 'actual') setZoom(1);
-    else if (action === 'closeDocument') { if(await mayReplace()){documentOpen=false;selection=cropRect=null;history.reset();selectedIds.clear();setDirty(false);api.commitDocument('close');document.body.classList.add('no-document');$('layer-list').replaceChildren();$('layer-count').textContent='0 个图层';$('document-name').textContent='';$('dimensions').textContent='';snapping.clear();brushCursor?.update();$('status').textContent='项目已关闭，可新建或打开项目';} }
-    else if (action === 'close') { if (await mayReplace()) { setDirty(false); api.close(); } }
+    else if (action === 'closeDocument') { if(await mayReplace()){dirty=false;workspace.remove();setDirty(documentOpen?dirty:false);} }
+    else if (action === 'close') {const original=workspace.current();for(const doc of [...workspace.documents]){workspace.activate(doc.id,true);if(!await mayReplace()){if(original)workspace.activate(original,true);return;}dirty=false;workspace.capture();}api.setDirty(false);api.close();}
     else if (action === 'addLayer') {
       capacity(project.width, project.height); checkpoint();
       const layer = rasterLayer('图层 ' + (project.layers.length + 1), project.width, project.height);
@@ -396,13 +409,18 @@ async function command(action) {
 }
 api.onCommand(command);
 document.querySelectorAll('[data-command]').forEach(button => button.onclick = () => command(button.dataset.command));
-document.querySelectorAll('[data-tool]').forEach(button => button.onclick = () => { if (!busy && !gesture) setTool(button.dataset.tool); });
+document.querySelectorAll('[data-tool]').forEach(button => button.onclick = () => { if (documentOpen&&!workspace?.isHome()&&!busy && !gesture) setTool(button.dataset.tool); });
 document.querySelectorAll('[data-dismiss]').forEach(button => button.onclick = () => button.closest('dialog').close());
 document.querySelectorAll('[data-choice]').forEach(button => button.onclick = () => $('confirm-dialog').close(button.dataset.choice));
-const newDocument = setupNewDocument(settings => {
-  newProject(settings.width, settings.height, settings.background, settings.title, settings.resolution);
+let newProfile;
+$('new-color-mode').addEventListener('change',()=>{newProfile=undefined;});
+const newDocument = setupNewDocument(async settings => {
+  let profile;
+  if(settings.colorMode==='CMYK'){const data=newProfile||await result(api.colorProfile('system'));const p=await initColorProfile(data);profile={name:p.name,data};}
+  newProject(settings.width, settings.height, settings.background, settings.title, settings.resolution,true,settings.colorMode,profile);
   $('canvas-tip').hidden = false;
 });
+$('new-profile-import').onclick=async()=>{try{const data=await result(api.colorProfile('custom'));if(data){const profile=await initColorProfile(data);newProfile=data;$('new-color-profile').replaceChildren(new Option(profile.name,profile.name));}}catch(e){toast(e.message);}};
 for (const id of ['size-width', 'size-height']) $(id).addEventListener('input', () => {
   if (sizeMode !== 'image') return;
   const value = Number($(id).value);
@@ -508,7 +526,8 @@ viewport.addEventListener('pointerdown', event => {
   if (tool === 'hand' || space || event.button === 1) {
     gesture = { kind: 'pan', startX: event.clientX, startY: event.clientY, pan: { ...pan } };
   } else {
-    if (p.x < 0 || p.y < 0 || p.x >= project.width || p.y >= project.height) return;
+    if (p.x < 0 || p.y < 0 || p.x >= project.width || p.y >= project.height) {transformSelected=false;drawOverlay();return;}
+    transformSelected=true;
     if (tool === 'move' && $('auto-select').checked) {
       let found = hitLayer(project, p);
       if (found && $('auto-select-mode').value === 'group') found = ancestors(project, found).at(-1) || found;
@@ -517,7 +536,7 @@ viewport.addEventListener('pointerdown', event => {
     const layer = active();
     if (tool === 'eyedropper') {
       const pixel = display.getContext('2d').getImageData(Math.floor(p.x), Math.floor(p.y), 1, 1).data;
-      if (pixel[3]) $('color').value = '#' + [...pixel].slice(0, 3).map(x => x.toString(16).padStart(2, '0')).join(''); colorSwatches();
+      if (pixel[3]) {$('color').value = '#' + [...pixel].slice(0, 3).map(x => x.toString(16).padStart(2, '0')).join('');rememberColor($('color').value,'color');} colorSwatches();
       return;
     }
     if (tool === 'text') {
@@ -525,15 +544,16 @@ viewport.addEventListener('pointerdown', event => {
       if (found && !event.altKey) { typeEditor.begin(found); return; }
       gesture = {kind:'textCreate',start:p,end:p};
     }
-    else if (tool === 'select' || tool === 'crop') {
-      gesture = { kind: tool, start: p, end: p };
+    else if(['quickSelect','wand'].includes(tool)){gesture=selections.begin(p,event,tool);if(tool==='wand'&&gesture){const g=gesture;gesture=null;selections.finish(g);return;}}
+    else if (tool === 'select' || tool === 'crop'||tool==='objectSelect') {
+      gesture = { kind: tool, start: p, end: p,oldSelection:selection,mode:selections.mode(event) };
     } else if (['rect', 'ellipse', 'gradient'].includes(tool)) {
       try { if (editTarget !== 'mask') capacity(project.width, project.height); else if (!pixelEditable()) return; } catch (error) { toast(error.message); return; }
       gesture = { kind: tool, start: p, end: p, color: editTarget === 'mask' ? grayColor($('color').value) : $('color').value, endColor: editTarget === 'mask' ? grayColor($('gradient-color').value) : $('gradient-color').value, mask: editTarget === 'mask', opacity: Number($('brush-opacity').value) / 100 };
     } else {
       if (!editable()) return;
       if (!isVisible(project, layer)) { toast('请先显示当前图层。'); return; }
-      if (tool === 'move') { try { gesture = snapping.begin(layer,p,editTarget === 'mask' && !layer.mask.linked); } catch(error) {toast(error.message);return;} }
+      if (tool === 'move') { try { gesture = snapping.begin(layer,p,editTarget === 'mask' && !layer.mask.linked&&!event.altKey,event.altKey); } catch(error) {toast(error.message);return;} }
       else if (tool === 'brush' || tool === 'eraser') {
         if (!pixelEditable()) return;
         checkpoint(); try { if (editTarget === 'mask') expandMask(project, layer, capacity); } catch (error) { toast(error.message); return; }
@@ -564,13 +584,14 @@ viewport.addEventListener('pointermove', event => {
   const g = gesture, p = point(event);
   if (g.kind === 'pan') { pan = { x: g.pan.x + event.clientX - g.startX, y: g.pan.y + event.clientY - g.startY }; applyView(); }
   else if (g.kind === 'transform') { try { transformUI.move(g,p,event.shiftKey); } catch (error) { toast(error.message); } }
+  else if(g.kind==='pixelSelect')selections.move(g,p);
   else if (g.kind === 'move') {
-    try { snapping.move(g,p,event.altKey); } catch(error) {toast(error.message);}
+    try { snapping.move(g,p,event.ctrlKey); } catch(error) {toast(error.message);}
   } else if (['brush', 'eraser'].includes(g.kind)) paintStroke(g, p);
   else {
     g.end = { x: clamp(p.x, 0, project.width), y: clamp(p.y, 0, project.height) };
     if (g.kind === 'textCreate') { drawOverlay(); const rect = rectangle(g.start,g.end), ctx = overlay.getContext('2d'); ctx.strokeStyle = '#6eacff'; ctx.lineWidth = 1/zoom; ctx.strokeRect(rect.x,rect.y,rect.width,rect.height); }
-    else if (g.kind === 'select' || g.kind === 'crop') {
+    else if (g.kind === 'select' || g.kind === 'crop'||g.kind==='objectSelect') {
       const rect = rectangle(g.start, g.end);
       if (g.kind === 'crop') cropRect = rect; else { selection = rect; cropRect = null; }
       drawOverlay();
@@ -586,8 +607,10 @@ function finishGesture(event) {
   const g = gesture; gesture = null;
   if (event && viewport.hasPointerCapture(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
   if (g.kind === 'textCreate') { const rect = rectangle(g.start,g.end), paragraph = rect.width*zoom>5 && rect.height*zoom>5; try { typeEditor.create(paragraph ? rect : {...rect,x:g.start.x,y:g.start.y},paragraph); $('canvas-tip').hidden = true; } catch (error) { toast(error.message); } }
+  else if(g.kind==='pixelSelect')selections.finish(g);
+  else if(g.kind==='objectSelect'){selection=g.oldSelection;const rect=rectangle(g.start,g.end);if(rect.width>1&&rect.height>1){const found=hitLayer(project,{x:rect.x+rect.width/2,y:rect.y+rect.height/2});if(found?.type==='raster')selectLayer(found);const l=active(),points=[[rect.x,rect.y],[rect.x+rect.width,rect.y],[rect.x,rect.y+rect.height],[rect.x+rect.width,rect.y+rect.height]].map(([x,y])=>localPoint(l,{x,y})),x=Math.max(0,Math.floor(Math.min(...points.map(p=>p.x)))),y=Math.max(0,Math.floor(Math.min(...points.map(p=>p.y))));if(l.canvas)cutout.open({mode:'selection',selectionMode:g.mode,region:{x,y,width:Math.min(l.canvas.width-x,Math.ceil(Math.max(...points.map(p=>p.x)))-x),height:Math.min(l.canvas.height-y,Math.ceil(Math.max(...points.map(p=>p.y)))-y)},autoRun:true});}drawOverlay();}
   else if (['transform','move'].includes(g.kind) && event?.type === 'pointercancel') (g.kind === 'move' ? snapping : transformUI).cancel(g);
-  else if (g.kind === 'select' || g.kind === 'crop') {
+  else if (g.kind === 'select' || g.kind === 'crop'||g.kind==='objectSelect') {
     const rect = rectangle(g.start, g.end);
     if (g.kind === 'crop') cropRect = rect.width && rect.height ? rect : null;
     else { selection = rect.width && rect.height ? rect : null; cropRect = null; }
@@ -608,15 +631,15 @@ window.addEventListener('blur', () => { space = false; finishGesture(); });
 window.addEventListener('keydown', event => {
   if (['transform','move'].includes(gesture?.kind) && event.key === 'Escape') { event.preventDefault(); const g = gesture; gesture = null; (g.kind === 'move' ? snapping : transformUI).cancel(g); return; }
   if(!event.defaultPrevented&&event.ctrlKey&&event.key.toLowerCase()==='w'){event.preventDefault();command('closeDocument');return;}
-  if(!documentOpen)return;
+  if(!documentOpen||workspace?.isHome())return;
   if (event.isComposing || event.target.matches('input,textarea,select') || event.target.closest('[role=menu]') || document.querySelector('dialog[open]')) return;
   if (event.code === 'Space') { event.preventDefault(); space = true; return; }
   // Menu accelerators own Ctrl combinations in Electron.
   if (event.ctrlKey || event.metaKey || event.altKey || busy || gesture) return;
-  const shortcuts = { v: 'move', m: 'select', c: 'crop', g: 'gradient', b: 'brush', e: 'eraser', t: 'text', u: 'rect', o: 'ellipse', i: 'eyedropper', h: 'hand' };
+  const shortcuts = { w:'objectSelect',v: 'move', m: 'select', c: 'crop', g: 'gradient', b: 'brush', e: 'eraser', t: 'text', u: 'rect', o: 'ellipse', i: 'eyedropper', h: 'hand' };
   if (shortcuts[event.key.toLowerCase()]) setTool(shortcuts[event.key.toLowerCase()]);
   if (event.key.toLowerCase() === 'x') $('swap-colors').click();
-  if (event.key.toLowerCase() === 'd') { $('color').value = '#000000'; $('gradient-color').value = '#ffffff'; colorSwatches(); }
+  if (event.key.toLowerCase() === 'd') { $('color').value = '#000000'; $('gradient-color').value = '#ffffff';$('gradient-color').dispatchEvent(new Event('input',{bubbles:true}));$('color').dispatchEvent(new Event('input',{bubbles:true})); colorSwatches(); }
   if (event.key === 'Escape') command('deselect');
   if (event.key === 'Enter' && cropRect) command('cropSelection');
   if (event.key === 'Delete') command(selection ? 'clearSelection' : 'deleteLayer');
@@ -642,19 +665,23 @@ viewport.addEventListener('drop', async event => {
       const data = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); });
       images.push({ name: file.name, data });
     }
-    await importImages(images);
+    if(!documentOpen||workspace?.isHome()){const image=await decodeImage(images[0].data);newProject(image.width,image.height,'transparent',images[0].name.replace(/\.[^.]+$/,''));}await importImages(images);
   } catch (error) { toast(error.message); } finally { setBusy(false); }
 });
 document.querySelectorAll('[data-psd-choice]').forEach(b => b.onclick = () => $('psd-warning-dialog').close(b.dataset.psdChoice));
+setupColors(()=>editTarget==='mask');
 setupShell(command, setTool, refresh);
-const cutout=setupCutout({project:()=>project,active,api,snapshot,history,capacity,changed,target:setTarget,toast,locked:l=>isLocked(project,l)});
-const fillEditor=setupFillEditor({project:()=>project,active,selection:()=>selection,api,snapshot,history,capacity,render,refresh,changed,toast});
-const layerStyles = setupLayerStyles({active,snapshot,history,changed,render,refresh,toast,locked:l=>isLocked(project,l)});
-typeEditor = setupTypeEditor({active,project:()=>project,snapshot,history,dirty:()=>dirty,setDirty,changed,render,refresh,checkpoint,capacity,select:selectLayer,tool:setTool,status:v=>$('status').textContent=v,focus:()=>viewport.focus(),locked:l=>isLocked(project,l)});
-transformUI = setupTransformControls({active,project:()=>project,snapshot,history,dirty:()=>dirty,setDirty,render,refresh,point,target:()=>editTarget,selected:()=>selectedIds,view:()=>({pan,zoom}),busy:()=>busy||!!gesture,show:()=>$('show-transform').checked && ['move','text'].includes(tool) && !typeEditor.editing,status:v=>$('status').textContent=v,begin:(event,g)=>{gesture=g;viewport.setPointerCapture(event.pointerId);viewport.focus();}});
-rulers=setupRulers({project:()=>project,open:()=>documentOpen,view:()=>({pan,zoom}),snapshot,history,checkpoint,changed,draw:()=>drawRulers(project,zoom,pan),busy:()=>busy||!!gesture,status:v=>$('status').textContent=v});
-snapping = setupSnapping({project:()=>project,selected:()=>selectedIds,snapshot,history,dirty:()=>dirty,setDirty,render,refresh,view:()=>({pan,zoom}),status:v=>$('status').textContent=v});
-$('show-transform').onchange = drawOverlay; $('text-options').onclick = () => showPanel('properties');
+selections=setupSelections({project:()=>project,active,display:()=>display,selection:()=>selection,set:value=>{selection=value;cropRect=null;drawOverlay();},tool:setTool,command,busy:value=>{setBusy(value);if(value)document.querySelector('.optionsbar').inert=false;},toast});
+const cutout=setupCutout({project:()=>project,active,api,snapshot,get history(){return history;},capacity,changed,render,putSelection:(mask,layer,kind)=>selections.fromMask(mask,layer,kind),target:setTarget,toast,locked:l=>isLocked(project,l)});
+const fillEditor=setupFillEditor({project:()=>project,active,selection:()=>selection,api,snapshot,get history(){return history;},capacity,render,refresh,changed,toast});
+const layerStyles = setupLayerStyles({active,snapshot,get history(){return history;},changed,render,refresh,toast,locked:l=>isLocked(project,l)});
+const blur=setupBlur({active,selection:()=>selection,snapshot,history:()=>history,render,changed,toast,locked:l=>isLocked(project,l)});
+typeEditor = setupTypeEditor({active,project:()=>project,snapshot,get history(){return history;},dirty:()=>dirty,setDirty,changed,render,refresh,checkpoint,capacity,select:selectLayer,tool:setTool,status:v=>$('status').textContent=v,focus:()=>viewport.focus(),locked:l=>isLocked(project,l)});
+transformUI = setupTransformControls({active,project:()=>project,snapshot,get history(){return history;},dirty:()=>dirty,setDirty,render,refresh,point,target:()=>editTarget,selected:()=>selectedIds,view:()=>({pan,zoom}),busy:()=>busy||!!gesture,show:()=>documentOpen&&transformSelected&&$('show-transform').checked && ['move','text'].includes(tool) && !typeEditor.editing&&!document.querySelector('dialog[open]'),status:v=>$('status').textContent=v,begin:(event,g)=>{gesture=g;viewport.setPointerCapture(event.pointerId);viewport.focus();}});
+rulers=setupRulers({project:()=>project,open:()=>documentOpen,view:()=>({pan,zoom}),snapshot,get history(){return history;},checkpoint,changed,draw:()=>drawRulers(project,zoom,pan),busy:()=>busy||!!gesture,status:v=>$('status').textContent=v});
+snapping = setupSnapping({project:()=>project,selected:()=>selectedIds,snapshot,get history(){return history;},capacity,dirty:()=>dirty,setDirty,render,refresh,view:()=>({pan,zoom}),status:v=>$('status').textContent=v});
+$('show-transform').onchange = ()=>{if($('show-transform').checked)transformSelected=true;drawOverlay();};
+document.addEventListener('pointerdown',event=>{if(!documentOpen||busy||gesture||event.target.closest('.layer-row,#transform-controls,#show-transform,dialog'))return;const rect=display.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom){transformSelected=false;drawOverlay();}}); $('text-options').onclick = () => showPanel('properties');
 for (const [id, key, divide] of [['mask-density', 'density', 100], ['mask-feather', 'feather', 1]]) $(id).addEventListener('change', () => {
   if (busy || !active().mask || !editable()) return; const value = Number($(id).value) / divide; if (!Number.isFinite(value)) return; checkpoint(); active().mask[key] = clamp(value, 0, key === 'density' ? 1 : 100); invalidatePixels(active().mask); changed();
 });
@@ -666,7 +693,14 @@ setupNumericScrubbing({busy:()=>busy||!!gesture,begin:input=>{if(!documentOpen||
 $('font-style').onchange=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;checkpoint();clearTextCache(active());const [weight,italic]=$('font-style').value.split(':');Object.assign(active(),{fontWeight:Number(weight),bold:Number(weight)>=700,italic:italic==='true'});changed();};
 for(const [id,key] of [['italic','italic'],['underline','underline']])$(id).onclick=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;checkpoint();clearTextCache(active());active()[key]=!active()[key];changed();};
 document.querySelectorAll('[data-align]').forEach(b=>b.onclick=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;checkpoint();clearTextCache(active());active().align=b.dataset.align;changed();});
-newProject(1280, 800, 'transparent', '未命名');
+workspace=setupWorkspace({capture:()=>({project,name,dirty,path,sourcePath,history,zoom,pan:{...pan},selection,cropRect,editTarget,selected:[...selectedIds],transformSelected}),
+  canSwitch:()=>!busy&&!gesture&&!document.querySelector('dialog[open]')&&!typeEditor.editing,
+  restore:doc=>{setTarget('image');({project,name,dirty,path,sourcePath,history,zoom,pan,selection,cropRect,transformSelected}=doc);documentOpen=true;document.body.classList.remove('no-document');selectedIds.clear();doc.selected.forEach(id=>selectedIds.add(id));setTarget(doc.editTarget);api.commitDocument({kind:'activate',path});resizeCanvas();applyView();render();refresh();updateTitle();api.setDirty(workspace.hasDirty());},
+  empty:()=>{documentOpen=false;selection=cropRect=null;history=new History();selectedIds.clear();dirty=false;api.commitDocument({kind:'activate',path:null});document.body.classList.add('no-document');$('layer-list').replaceChildren();$('layer-count').textContent='0 个图层';$('dimensions').textContent='';snapping.clear();brushCursor.update();},
+  close:id=>{if(workspace.activate(id))command('closeDocument');},open:file=>command('open',file),
+  thumbnail:()=>{const thumb=canvas(240,150),ctx=thumb.getContext('2d'),ratio=Math.min(240/project.width,150/project.height);ctx.fillStyle='#282828';ctx.fillRect(0,0,240,150);ctx.drawImage(display,(240-project.width*ratio)/2,(150-project.height*ratio)/2,project.width*ratio,project.height*ratio);return thumb.toDataURL('image/jpeg',.7);}
+});
+newProject(1280, 800, 'transparent', '未命名',72,false);documentOpen=false;document.body.classList.add('no-document');workspace.showHome();
 setTool('move');
 setBusy(false);
 new ResizeObserver(() => { if (project && !gesture) fit(); }).observe(viewport);

@@ -3,6 +3,8 @@ const {exportAdjustment,importAdjustment,exportFill,importFill}=require('./psd-a
 const crypto = require('node:crypto');
 const { PNG } = require('pngjs');
 const { readPsd, writePsdBuffer, getLayerImageData, getLayerMaskImageData, getCompositeImageData, initializeCanvas } = require('ag-psd');
+// The pinned decoder has CMYK channel support; our adapter supplies ICC conversion.
+const {supportedColorModes}=require('ag-psd/dist/psdReader');if(!supportedColorModes.includes(4))supportedColorModes.push(4);
 const { validateProject, pngPixels, MAX_BYTES } = require('./project.cjs');
 const { importEffects, exportEffects, colorHex } = require('./psd-effects.cjs');
 const MAX_PIXELS = 64 * 1024 * 1024;
@@ -27,7 +29,7 @@ function sizePixels(w, h) {
 function header(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length < 26 || buffer.length > MAX_BYTES || buffer.toString('ascii', 0, 4) !== '8BPS') throw new Error('PSD 文件损坏或超过 128 MB。');
   if (buffer.readUInt16BE(4) !== 1) throw new Error('暂不支持 PSB，请转换为 PSD。');
-  if (buffer.readUInt16BE(22) !== 8 || buffer.readUInt16BE(24) !== 3) throw new Error('当前支持 RGB 8 位 PSD，请先转换颜色模式和位深。');
+  if (buffer.readUInt16BE(22) !== 8 || ![3,4].includes(buffer.readUInt16BE(24))) throw new Error('当前支持 RGB / CMYK 8 位 PSD，请先转换颜色模式和位深。');
   sizePixels(buffer.readUInt32BE(18), buffer.readUInt32BE(14));
   let offset = 30 + buffer.readUInt32BE(26);
   if (offset + 4 > buffer.length) throw new Error('PSD 颜色数据损坏。');
@@ -40,16 +42,17 @@ function header(buffer) {
     if (offset + 4 > end) throw new Error('PSD 资源数据损坏。');
     const length = buffer.readUInt32BE(offset); offset += 4;
     if (offset + length > end) throw new Error('PSD 资源数据损坏。');
-    if (id === 1039) {
+    if (id === 1039 && buffer.readUInt16BE(24) === 3) {
       const profile = buffer.subarray(offset, offset + length).toString('latin1');
       if (!/sRGB|s\x00r\x00g\x00b|\x00s\x00r\x00g\x00b/i.test(profile)) throw new Error('当前工作空间为 sRGB。请先将 PSD 的颜色配置文件转换为 sRGB 后打开。');
     }
     offset += length + length % 2;
   }
 }
-function readPsdDocument(buffer) {
+function readPsdDocument(buffer,profile) {
   header(buffer);
   const psd = readPsd(buffer, { useImageData: true, useRawData: true, skipThumbnail: true, skipLinkedFilesData: true, totalMemoryLimit: 512 * 1024 * 1024 });
+  if(profile)require('./cmyk-psd.cjs').correctComposite(psd,buffer,profile);
   if (psd.imageResources?.pixelAspectRatio && psd.imageResources.pixelAspectRatio.aspect !== 1) throw new Error('当前只支持方形像素，请先转换 PSD 的像素长宽比。');
   let count = 0, pixels = 0;
   const unsupported = new Set(), warnings = new Set();
@@ -78,9 +81,9 @@ function readPsdDocument(buffer) {
   let resolution = psd.imageResources?.resolutionInfo?.horizontalResolution || 72;
   if (psd.imageResources?.resolutionInfo?.horizontalResolutionUnit === 'PPCM') resolution *= 2.54;
   resolution = Math.max(1, Math.min(9600, resolution));
-  const project = { format: 'com.compositor.windows', version: 5, width: psd.width, height: psd.height, resolution, colorSpace: 'sRGB', guides:(psd.imageResources?.gridAndGuidesInformation?.guides||[]).slice(0,200).map(g=>({id:crypto.randomUUID(),axis:g.direction==='vertical'?'x':'y',position:g.location})), layers: [], activeId: '' };
+  const project = { format: 'com.compositor.windows', version: 6,colorMode:psd.colorMode===4?'CMYK':'RGB',...(profile?{colorProfile:{name:profile.name,data:Buffer.from(profile.bytes).toString('base64')}}:{}), width: psd.width, height: psd.height, resolution, colorSpace: 'sRGB', guides:(psd.imageResources?.gridAndGuidesInformation?.guides||[]).slice(0,200).map(g=>({id:crypto.randomUUID(),axis:g.direction==='vertical'?'x':'y',position:g.location})), layers: [], activeId: '' };
   if (!count) {
-    const pixels = getCompositeImageData(psd);
+    const pixels = (profile?psd.imageData:getCompositeImageData(psd));
     if (!pixels) throw new Error('PSD 包含未支持的内容，且没有可用的合成预览。请先栅格化相关图层。');
     const layer = { ...base('PSD 合成图', 'raster'), data: dataURL(pixels) }; project.layers = [layer]; project.activeId = layer.id;
     return { project: validateProject(project), requiresFlatten: false, warnings: ['此 PSD 本身没有独立图层记录，已打开文件内的合成图。'], source: 'psd' };
@@ -91,7 +94,7 @@ function readPsdDocument(buffer) {
       const l = base(node.name, node.children ? 'group' : 'raster', node, parentId);
       if (node.children) { l.collapsed = node.opened === false; convert(node.children, l.id); }
       else {
-        const bitmap = getLayerImageData(node);
+        const bitmap = profile?require('./cmyk-psd.cjs').correctLayer(node,profile):getLayerImageData(node);
         l.data = bitmap ? dataURL(bitmap) : dataURL({ width: 1, height: 1, data: new Uint8Array(4) });
         if (node.text) {
           const t = node.text, style = t.style || t.styleRuns?.[0]?.style || {}, runs = t.styleRuns || [], matrix = t.transform || [1,0,0,1,0,0];
@@ -125,7 +128,7 @@ function readPsdDocument(buffer) {
   };
   convert(psd.children); project.activeId = project.layers.at(-1).id;
   let preview;
-  if (unsupported.size) { const bitmap = getCompositeImageData(psd); if (bitmap) preview = { ...project, layers: [{ ...base('PSD 合成图', 'raster'), data: dataURL(bitmap) }] }; if (preview) preview.activeId = preview.layers[0].id; }
+  if (unsupported.size) { const bitmap = (profile?psd.imageData:getCompositeImageData(psd)); if (bitmap) preview = { ...project, layers: [{ ...base('PSD 合成图', 'raster'), data: dataURL(bitmap) }] }; if (preview) preview.activeId = preview.layers[0].id; }
   return { project: validateProject(project), preview, warnings: [...unsupported].map(s => '含' + s + '：已保留图层，相关外观可能不同。').concat([...warnings]), source: 'psd', requiresFlatten: false, requiresConversion: unsupported.size > 0 };
 }
 function writePsdDocument(project, composite) {

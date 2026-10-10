@@ -1,6 +1,6 @@
 import { visualBounds, transformPoint } from './editor.js';
-import { descendants, ancestors, isVisible, isLocked } from './layer-tree.js';
-import { transformLayer } from './advanced.js';
+import { descendants, ancestors, isVisible, isLocked, canonicalize } from './layer-tree.js';
+import { transformLayer, cloneLayer, pixelCount } from './advanced.js';
 import { snapBox, boxGap } from './snap-model.mjs';
 
 function worldBox(layer) {
@@ -18,7 +18,7 @@ export function setupSnapping(state) {
   try { toggle.checked = localStorage.getItem('compositor.snap') !== 'false'; } catch {}
   function clear() { element.replaceChildren(); element.setAttribute('hidden',''); }
   toggle.onchange = () => { try { localStorage.setItem('compositor.snap', String(toggle.checked)); } catch {} clear(); };
-  function begin(layer, point, maskOnly) {
+  function begin(layer, point, maskOnly, copy=false) {
     const p = state.project(), selected = p.layers.filter(l=>state.selected().has(l.id));
     const roots = (selected.length ? selected : [layer]).filter(l=>!ancestors(p,l).some(a=>state.selected().has(a.id)));
     const moving = new Set();
@@ -28,10 +28,18 @@ export function setupSnapping(state) {
     const boxes = originals.filter(i=>maskOnly || i.layer.type !== 'group' && isVisible(p,i.layer)).map(i=>worldBox(maskOnly ? i.layer.mask : i.layer)).filter(Boolean);
     const guides=(p.ruler?.guidesVisible===false?[]:p.guides||[]).map(g=>({axis:g.axis,x:g.axis==='x'?g.position:0,y:g.axis==='y'?g.position:0,width:g.axis==='x'?0:p.width,height:g.axis==='y'?0:p.height,canvas:true,guide:true}));
     const targets = [...guides,{x:0,y:0,width:p.width,height:p.height,canvas:true},...p.layers.filter(l=>l.type!=='group' && !moving.has(l) && isVisible(p,l)).map(worldBox).filter(Boolean)];
-    return {kind:'move',start:point,maskOnly,originals,box:boxes.length ? union(boxes) : null,targets,before:state.snapshot(),dirty:state.dirty(),undo:[...state.history.undoStack],redo:[...state.history.redoStack],committed:false};
+    return {kind:'move',start:point,maskOnly,originals,copy,roots,activeId:p.activeId,selected:[...state.selected()],box:boxes.length ? union(boxes) : null,targets,before:state.snapshot(),dirty:state.dirty(),undo:[...state.history.undoStack],redo:[...state.history.redoStack],committed:false};
   }
   function move(g, point, bypass) {
     let dx = Math.round(point.x-g.start.x), dy = Math.round(point.y-g.start.y);
+    if(g.copy&&!g.copies&&(dx||dy)){
+      for(const {original:o} of g.originals)for(const target of [o,o.mask].filter(Boolean))if(Math.abs(target.x+dx)>100000||Math.abs(target.y+dy)>100000)throw new Error('位置超出限制。');
+      const p=state.project(),layers=g.originals.map(i=>i.layer);state.capacity(layers.reduce((n,l)=>n+pixelCount(l),0),1,layers.length);
+      const ids=new Map(layers.map(l=>[l.id,crypto.randomUUID()])),copies=layers.map(l=>cloneLayer(l,ids));g.copies=copies;
+      for(const root of g.roots){const copy=copies.find(l=>l.id===ids.get(root.id));copy.name=(root.name+' 副本').slice(0,200);const subtree=copies.filter(l=>l===copy||ancestors({layers:copies},l).some(a=>a===copy));p.layers.splice(p.layers.indexOf(root)+1,0,...subtree);}
+      canonicalize(p);p.activeId=ids.get(g.activeId)||copies.at(-1).id;state.selected().clear();g.roots.forEach(l=>state.selected().add(ids.get(l.id)));
+      g.originals=copies.map(layer=>({layer,original:{...layer,mask:layer.mask?{...layer.mask}:undefined}}));state.refresh();
+    }
     let snap;
     if (toggle.checked && !bypass && g.box) { snap = snapBox(g.box,g.targets,dx,dy,6/state.view().zoom); dx = snap.dx; dy = snap.dy; }
     const plans = g.originals.map(({layer,original:o})=>{
@@ -45,11 +53,12 @@ export function setupSnapping(state) {
     if (!g.committed && (dx || dy)) { state.history.push(g.before); g.committed = true; }
     if (!g.committed) return;
     for (const {layer,next} of plans) Object.assign(layer,next);
-    state.render(); draw(snap); state.status(`移动：${Math.round(dx)} / ${Math.round(dy)} 像素${snap?.hits.length ? ' · 已吸附' : ''} · Alt 暂停吸附 · Esc 取消`);
+    state.render(); draw(snap); state.status(`移动：${Math.round(dx)} / ${Math.round(dy)} 像素${snap?.hits.length ? ' · 已吸附' : ''} · Ctrl 暂停吸附 · Alt 拖动复制 · Esc 取消`);
   }
   function cancel(g) {
     g.originals.forEach(i=>Object.assign(i.layer,i.original));
     if (g.committed) { state.history.undoStack=g.undo;state.history.redoStack=g.redo; }
+    if(g.copies){const p=state.project();p.layers=p.layers.filter(l=>!g.copies.includes(l));p.activeId=g.activeId;state.selected().clear();g.selected.forEach(id=>state.selected().add(id));}
     clear();state.setDirty(g.dirty);state.render();state.refresh();state.status('已取消移动');
   }
   function draw(snap) {

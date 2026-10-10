@@ -49,6 +49,7 @@ app.whenReady().then(() => {
     { label: '图层(&L)', submenu: [item('新建图层', 'Ctrl+Shift+N', 'addLayer'), item('复制图层', 'Ctrl+J', 'duplicate'), item('删除图层', undefined, 'deleteLayer'), item('向上移动', undefined, 'raise'), item('向下移动', undefined, 'lower'), item('创建图层组', 'Ctrl+G', 'group'), item('取消分组', 'Ctrl+Shift+G', 'ungroup'), item('创建 / 释放剪贴蒙版', 'Ctrl+Alt+G', 'clipping'), { type: 'separator' }, item('栅格化文字', undefined, 'rasterize'), item('向下合并', 'Ctrl+E', 'mergeDown'), item('合并可见图层', 'Ctrl+Shift+M', 'mergeVisible')] },
     { label: '图层样式', submenu: [item('自由变换','Ctrl+T','freeTransform'),item('图层样式…',undefined,'layerStyles'),item('清除图层样式',undefined,'clearStyles')] },
     { label: '选择(&S)', submenu: [item('全选', 'Ctrl+A', 'selectAll'), item('取消选区', 'Ctrl+D', 'deselect')] },
+    { label:'滤镜(&T)',submenu:[{label:'模糊',submenu:[['gaussian','高斯模糊…'],['box','方框模糊…'],['motion','动感模糊…'],['radial','径向模糊…'],['surface','表面模糊…'],['average','平均']].map(([kind,label])=>item(label,undefined,'blur:'+kind))},item('选择主体 / 移除背景…',undefined,'removeBackground')] },
     { label: '视图(&V)', submenu: [item('标尺','Ctrl+R','toggleRulers'),item('参考线','Ctrl+;','toggleGuides'),item('适合窗口', 'Ctrl+0', 'fit'), item('实际像素', 'Ctrl+1', 'actual'), { label: '全屏', role: 'togglefullscreen' }] },
     { label: '帮助(&H)', submenu: [item('使用说明与快捷键', undefined, 'help'), { label: '关于 Compositor 中文版', click: () => dialog.showMessageBox(win, { type: 'info', title: '关于', message: 'Compositor 中文版 ' + app.getVersion(), detail: '基于 robbietilton/Compositor 的独立 Windows 核心功能移植。\n原项目及本移植使用 MIT 许可证。\n支持分层 PSD、图层组、像素蒙版、剪贴蒙版、绘画、中文文字、选区裁剪、渐变、调整与图片导入导出。' }) }] }
   ]));
@@ -63,8 +64,10 @@ app.whenReady().then(() => {
   const ai=require('./ai-service.cjs').createAiService(p=>{if(!win.isDestroyed())win.webContents.send('ai:progress',p);});
   handle('ai:run',p=>ai.run(p));handle('ai:cancel',()=>ai.cancel());win.on('closed',()=>ai.cancel());
   handle('fonts:list',()=>new Promise((resolve,reject)=>{require('node:child_process').execFile('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(__dirname.replace('app.asar','app.asar.unpacked'),'native','fonts.ps1')],{windowsHide:true,encoding:'utf8',maxBuffer:2*1024*1024},(error,out)=>error?reject(error):resolve(JSON.parse(out.replace(/^\uFEFF/,''))));}));
-  handle('project:open', async () => {
-    const result = await dialog.showOpenDialog(win, { title: '打开项目或 PSD', filters: [{ name: '项目与 Photoshop 文件', extensions: ['ccomp', 'psd'] }, { name: 'Photoshop PSD', extensions: ['psd'] }, { name: 'Compositor 项目', extensions: ['ccomp'] }], properties: ['openFile'] });
+  handle('color:profile',async kind=>{let file=path.join(process.env.WINDIR,'System32','spool','drivers','color','RSWOP.icm');if(kind==='custom'){const r=await dialog.showOpenDialog(win,{title:'选择 CMYK ICC 配置文件',filters:[{name:'ICC 配置文件',extensions:['icc','icm']}],properties:['openFile']});if(r.canceled)return null;file=r.filePaths[0];}const b=await fs.readFile(file);if(b.length<128||b.length>4*1024*1024||b.toString('ascii',36,40)!=='acsp'||b.toString('ascii',16,20)!=='CMYK')throw new Error('请选择 CMYK ICC 配置文件。');return b.toString('base64');});
+  handle('project:open', async requestedPath => {
+    if(requestedPath&&(!path.isAbsolute(requestedPath)||!['.ccomp','.psd'].includes(path.extname(requestedPath).toLowerCase())))throw new Error('最近项目路径无效。');
+    const result = requestedPath?{canceled:false,filePaths:[requestedPath]}:await dialog.showOpenDialog(win, { title: '打开项目或 PSD', filters: [{ name: '项目与 Photoshop 文件', extensions: ['ccomp', 'psd'] }, { name: 'Photoshop PSD', extensions: ['psd'] }, { name: 'Compositor 项目', extensions: ['ccomp'] }], properties: ['openFile'] });
     if (result.canceled) return null;
     const file = result.filePaths[0];
     if (path.extname(file).toLowerCase() === '.psd') {
@@ -137,7 +140,7 @@ app.whenReady().then(() => {
     return data;
   });
   // The renderer commits a path only after all project images decode successfully.
-  ipcMain.on('document:commit', (event, kind) => { trusted(event); currentPath = kind === 'open' ? pendingPath : null; pendingPath = null; });
+  ipcMain.on('document:commit', (event, kind) => { trusted(event); currentPath = kind?.kind==='activate'?kind.path:kind === 'open' ? pendingPath : null; pendingPath = null; });
   ipcMain.on('document:close', event => { trusted(event); if (!dirty) win.close(); });
   ipcMain.on('renderer:ready',event => { trusted(event); win.webContents.send('startup:complete'); });
   win.loadURL(index);
