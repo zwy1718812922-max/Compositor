@@ -1,11 +1,11 @@
 # Compositor 中文 Windows 版
 
-这是基于 [robbietilton/Compositor](https://github.com/robbietilton/Compositor) 制作的独立 Windows 核心功能移植，版本为 **0.7.1**。原版 SwiftUI / AppKit / Metal 程序保留在仓库中；Windows 轻量版使用系统 WebView2、WinForms 与 Canvas 2D，另保留 Electron 兼容版，在本机运行，不需要账号或联网编辑。
+这是基于 [robbietilton/Compositor](https://github.com/robbietilton/Compositor) 制作的独立 Windows 核心功能移植，版本为 **0.7.2**。原版 SwiftUI / AppKit / Metal 程序保留在仓库中；Windows 轻量版使用系统 WebView2、WinForms 与 Canvas 2D，另保留 Electron 兼容版，在本机运行，不需要账号或联网编辑。
 
 ## 直接运行
 
-- **轻量安装版（推荐）**：运行 `dist/Compositor-ZH-0.7.1-x64-Lite-Setup.exe`，中文向导安装到当前用户程序目录。
-- **轻量免安装版**：完整解压 `dist/Compositor-ZH-0.7.1-x64-Lite.zip`，双击 `lite-unpacked/Compositor 中文版.exe`。请保留同目录的 DLL、src、assets、ai 和 native 文件夹。
+- **轻量安装版（推荐）**：运行 `dist/Compositor-ZH-0.7.2-x64-Lite-Setup.exe`，中文向导安装到当前用户程序目录。更新前关闭软件，安装器会阻止正在运行的程序被部分覆盖。
+- **轻量免安装版**：完整解压 `dist/Compositor-ZH-0.7.2-x64-Lite.zip`，双击 `lite-unpacked/Compositor 中文版.exe`。请保留同目录的 DLL、src、assets、ai 和 native 文件夹。
 - **本地直接启动**：双击仓库根目录 `启动中文版.cmd`，优先运行轻量版。
 - **Electron 兼容版**：运行 `dist/win-unpacked/Compositor 中文版.exe`；移动时保留整个文件夹。
 
@@ -14,6 +14,10 @@
 目标系统为 Windows 11 x64。安装包暂未使用商业代码签名证书签名；Windows 可能显示未知发布者提示。
 
 可通过“打开项目”载入 `examples/中文示例.ccomp`，体验包含可编辑中文文字、图层组和像素蒙版的示例。另有 examples/中文示例.psd 可用于分层交换。界面预览见 `preview.png`。
+
+## 0.7.2 PSD 打开修复
+
+兼容旧版主程序返回的 PSD 数据，解决混合版本安装导致的“无法读取 split”及错误请求 `undefined`。完整更新使用新版二进制通道；PSD 仍需满足下方格式限制。新版安装器会在程序运行时停止更新，避免安装目录混用版本。
 
 ## 0.7.1 性能修复
 
@@ -152,7 +156,7 @@ AI 组件和权重按需下载，**不包含在 轻量基础安装包内**，缓
 
 ## 当前范围
 
-本版本并非原版全部功能的等价移植。**尚不支持原版 `.comp`、PSB、RAW/HEIC/TIFF、复杂 PSD 文字、可编辑矢量蒙版、可编辑智能对象、自由形状选区、自由曲线点编辑、Camera Raw、压感、多文档标签页、自动更新和崩溃恢复。** 调整图层提供常用参数，算法近似 PS，不能保证与 Photoshop 色彩引擎完全一致。不应将 `.ccomp` 改名为 `.comp`。
+本版本并非原版全部功能的等价移植。**尚不支持原版 `.comp`、PSB、RAW/HEIC/TIFF、复杂 PSD 文字、可编辑矢量蒙版、可编辑智能对象、自由曲线点编辑、Camera Raw、压感、浮动文档窗口、自动更新和崩溃恢复。** 调整图层提供常用参数，算法近似 PS，不能保证与 Photoshop 色彩引擎完全一致。不应将 `.ccomp` 改名为 `.comp`。
 
 画布每边限制 16384 像素，画布总像素不超过 64 × 1024 × 1024；最多 100 个图层，图层与蒙版合计也不超过 64 × 1024 × 1024；项目文件不超过 128 MB。分辨率为 1–9600 ppi。历史记录最多 25 步，并受内存预算限制。文字依赖本机字体，缺失字体时使用系统回退，跨电脑外观可能变化。
 
@@ -193,7 +197,7 @@ npm run test:lite   # 真实轻量版功能检查
 
 轻量编译使用系统 .NET Framework C# 编译器及 Microsoft.Web.WebView2 1.0.3179.45 SDK。默认从用户 NuGet 缓存读取；可运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-native.ps1 -WebView2Package "SDK 解压目录"` 指定 SDK。可从 NuGet 的 Microsoft.Web.WebView2 对应版本取得 SDK；NSIS 打包默认使用 electron-builder 缓存的 makensis.exe，也可通过 package-native.ps1 的 -NsisCompiler 参数指定。
 
-`npm test` 覆盖 20 项 Node 校验与 40 项真实 Electron 编辑器检查。`npm run test:lite` 验证真实 WebView2 程序；设置 COMPOSITOR_VERIFY_PSD 可验证指定实际 PSD。安装/卸载与剪贴板附加检查见 scripts/verify-native-package.ps1，会保留、恢复原剪贴板，并验证卸载不删除其他用户文件。
+`npm test` 执行 Node 校验与真实 Electron 编辑器检查。`npm run test:lite` 验证真实 WebView2 程序；设置 COMPOSITOR_VERIFY_PSD 后运行 `node scripts/verify-psd-open.cjs` 可验证指定实际 PSD，COMPOSITOR_NATIVE_EXECUTABLE 可指定安装后的程序。`scripts/verify-native-update.ps1` 验证运行中的程序不会被部分更新。安装/卸载与剪贴板附加检查见 scripts/verify-native-package.ps1，会保留、恢复原剪贴板，并验证卸载不删除其他用户文件。
 
 测试会短暂启动应用窗口，验证真实绘图像素、擦除、撤销重做、图层显示锁定、中文文字、重命名、图片导入、变换、保存重开一致性及 PNG/JPEG 文件写出。
 

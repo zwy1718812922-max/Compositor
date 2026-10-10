@@ -49,7 +49,7 @@ internal sealed class EditorWindow : Form {
     static bool Flag(object value) { return value is bool && (bool)value; }
     static double Number(object value) { return Convert.ToDouble(value); }
     public EditorWindow() {
-        Text="Compositor 中文版 0.7.1"; ClientSize=new Size(1440,960);MinimumSize=new Size(1024,720);StartPosition=FormStartPosition.CenterScreen;
+        Text="Compositor 中文版 0.7.2"; ClientSize=new Size(1440,960);MinimumSize=new Size(1024,720);StartPosition=FormStartPosition.CenterScreen;
         FormBorderStyle=FormBorderStyle.None;BackColor=Color.FromArgb(38,38,38);Padding=new Padding(1);AutoScaleMode=AutoScaleMode.Dpi;
         MaximizedBounds=Screen.FromControl(this).WorkingArea;var icon=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"assets","icon.ico");if(File.Exists(icon))Icon=new Icon(icon);
         web.Dock=DockStyle.Fill;web.DefaultBackgroundColor=BackColor;Controls.Add(web);Controls.Add(splash);splash.BringToFront();

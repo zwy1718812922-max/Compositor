@@ -2,7 +2,7 @@
 
 本地版本管理说明见 [Git 工作流程](docs/git-workflow.zh-CN.md)。
 
-> **中文 Windows 11 版 0.7.1（本地移植）**：见 [使用说明](windows/README.zh-CN.md)。双击仓库根目录的 `启动中文版.cmd`，或使用 `windows/dist` 中轻量安装包。PSD 直接解码图层像素，按视口预览并缓存 FX，改善大文件导入、拖动与选色速度。支持最近项目主页、独立多文档标签、Alt 拖动复制、颜色记忆、无遮罩填充预览、对象/快速/魔棒选择、六类模糊及 ICC CMYK 分层 PSD；另有图层、蒙版、FX、文字、字体收藏、数字拖动、标尺与本地 U²-Net/NPU 抠图。AI 组件按需安装，原 macOS 源码保留不变。
+> **中文 Windows 11 版 0.7.2（本地移植）**：见 [使用说明](windows/README.zh-CN.md)。双击仓库根目录的 `启动中文版.cmd`，或使用 `windows/dist` 中轻量安装包。修复混合版本安装导致的 PSD 打开失败，更新时会检查软件是否运行。PSD 直接解码图层像素，按视口预览并缓存 FX，改善大文件导入、拖动与选色速度。支持最近项目主页、独立多文档标签、Alt 拖动复制、颜色记忆、无遮罩填充预览、对象/快速/魔棒选择、六类模糊及 ICC CMYK 分层 PSD；另有图层、蒙版、FX、文字、字体收藏、数字拖动、标尺与本地 U²-Net/NPU 抠图。AI 组件按需安装，原 macOS 源码保留不变。
 
 Adobe Photoshop costs too much and tools like GIMP don’t feel familiar enough for me to stay in flow. That’s why I built Compositor.
 

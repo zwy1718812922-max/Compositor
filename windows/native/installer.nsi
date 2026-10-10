@@ -2,7 +2,7 @@
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 !ifndef VERSION
-  !define VERSION "0.7.1"
+  !define VERSION "0.7.2"
 !endif
 Name "Compositor 中文版"
 OutFile "..\dist\Compositor-ZH-${VERSION}-x64-Lite-Setup.exe"
@@ -25,6 +25,20 @@ ShowUninstDetails show
 !insertmacro MUI_LANGUAGE "SimpChinese"
 Section "Compositor" SEC_MAIN
   SetShellVarContext current
+  check_app_closed:
+  IfFileExists "$INSTDIR\Compositor 中文版.exe" 0 install_files
+  ClearErrors
+  FileOpen $R2 "$INSTDIR\Compositor 中文版.exe" a
+  IfErrors app_running
+  FileClose $R2
+  Goto install_files
+  app_running:
+  IfSilent stop_install
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "Compositor 正在运行，无法完整更新。请先关闭软件，然后点击重试。" IDRETRY check_app_closed
+  stop_install:
+  SetErrorLevel 2
+  Quit
+  install_files:
   SetOutPath "$INSTDIR"
   File /r "..\dist\lite-unpacked\*"
   WriteUninstaller "$INSTDIR\卸载.exe"
