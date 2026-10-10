@@ -17,7 +17,7 @@ function pngPixels(data, limit = 16384) {
   if (!w || !h || w > limit || h > limit || w * h > 64 * 1024 * 1024) throw new Error('图层或蒙版图片尺寸超过限制。');
   return w * h;
 }
-function validateProject(p) {
+function validateProject(p, allowPixels = false) {
   if (!p || p.format !== FORMAT || ![1, 2, 3, 4, 5, 6].includes(p.version)) throw new Error('不支持的项目格式或版本。请打开 .ccomp 项目。');
   const limit = p.version === 1 ? 4096 : 16384;
   if (![p.width, p.height].every(n => Number.isInteger(n) && number(n, 1, limit)) || p.width * p.height > 64 * 1024 * 1024) throw new Error('画布尺寸超过此项目版本的限制。');
@@ -27,6 +27,12 @@ function validateProject(p) {
   if (!Array.isArray(p.layers) || p.layers.length < 1 || p.layers.length > 100) throw new Error('项目需要 1–100 个图层。');
   const ids = new Set();
   let pixels = 0;
+  const bitmapPixels = item => {
+    if (!allowPixels || !item.pixels) return pngPixels(item.data, limit);
+    const {width,height,data}=item.pixels;
+    if(![width,height].every(n=>Number.isInteger(n)&&number(n,1,limit))||width*height>64*1024*1024||!(data instanceof Uint8Array||data instanceof Uint8ClampedArray)||data.byteLength!==width*height*4)throw new Error('PSD 像素数据无效。');
+    return width*height;
+  };
   for (const l of p.layers) {
     if (!l || typeof l.id !== 'string' || !l.id.length || l.id.length > 200 || ids.has(l.id)) throw new Error('图层标识无效或重复。');
     ids.add(l.id);
@@ -44,19 +50,19 @@ function validateProject(p) {
     if(l.type==='fill'){validateFill(l);pixels+=l.width*l.height;if(l.fill.data)pixels+=pngPixels(l.fill.data,512);}
     else if(l.type==='adjustment')validateAdjustment(l);
     else if (l.type === 'raster') {
-      pixels += pngPixels(l.data, limit);
+      pixels += bitmapPixels(l);
     } else if (l.type === 'text') {
       if (typeof l.text !== 'string' || l.text.length > 10000 || typeof l.font !== 'string' || l.font.length > 200 || !number(l.fontSize, 1, 1000) || !/^#[\da-f]{6}$/i.test(l.color) || typeof l.bold !== 'boolean') throw new Error('文字图层信息无效。');
       if(l.fontWeight!==undefined&&!number(l.fontWeight,100,900)||['italic','underline'].some(k=>l[k]!==undefined&&typeof l[k]!=='boolean'))throw new Error('字体样式无效。');
       if(l.textGeometry){const m=l.textGeometry.matrix;if(!Array.isArray(m)||m.length!==6||!m.every(n=>number(n,-100000,100000)))throw new Error('PSD 文字矩阵无效。');decompose(m.slice(0,4));}
       if (l.textMode !== undefined && !['point', 'paragraph'].includes(l.textMode) || l.align !== undefined && !['left', 'center', 'right'].includes(l.align) || l.lineHeight !== undefined && !number(l.lineHeight, .5, 5) || l.letterSpacing !== undefined && !number(l.letterSpacing, -100, 1000)) throw new Error('文字排版属性无效。');
       if (l.textMode === 'paragraph' && (!number(l.boxWidth, 1, 16384) || !number(l.boxHeight, 1, 16384))) throw new Error('段落文字框尺寸无效。');
-      if (l.textRasterCache) pixels += pngPixels(l.data, limit);
+      if (l.textRasterCache) pixels += bitmapPixels(l);
     } else if (l.data !== undefined || l.x !== 0 || l.y !== 0 || l.scale !== 1 || l.rotation !== 0 || typeof l.collapsed !== 'boolean') throw new Error('图层组的变换或折叠状态无效。');
     if (l.mask) {
       const m = l.mask;
       if (!number(m.x, -100000, 100000) || !number(m.y, -100000, 100000) || !number(m.scale, .01, 100) || !number(m.rotation, -36000, 36000) || !number(m.defaultColor, 0, 255) || !number(m.density, 0, 1) || !number(m.feather, 0, 100) || typeof m.enabled !== 'boolean' || typeof m.linked !== 'boolean') throw new Error('蒙版属性无效。');
-      pixels += pngPixels(m.data, limit);
+      pixels += bitmapPixels(m);
     }
   }
   if(p.guides!==undefined&&(!Array.isArray(p.guides)||p.guides.length>200||p.guides.some(g=>!g||typeof g.id!=='string'||!['x','y'].includes(g.axis)||!number(g.position,-100000,100000))))throw new Error('参考线无效。');

@@ -12,6 +12,7 @@ import { setupFillEditor } from './fill-editor.js';
 import { setupFonts } from './fonts.js';
 import { hitLayer, invalidatePixels, rasterLayer, textLayer, canvas, bounds, layerTransform, localPoint, renderInto, composite, serialize, deserialize, decodeImage, History, MAX_PIXELS } from './editor.js';
 import { preparePsd } from './psd-export.js';
+import { renderPreview } from './render-preview.js';
 import { advancedCommand, pixelCount, grayColor, moveLayer, transformLayer, expandMask } from './advanced.js';
 import { childrenOf, descendants, ancestors, panelLayers, canonicalize, moveToGroup, isLocked, isVisible } from './layer-tree.js';
 import { setupShell, showPanel, colorSwatches, drawRulers } from './ui-shell.js';
@@ -49,7 +50,7 @@ function selectLayer(layer, target = 'image', multiple = false) {
   if (multiple && selectedIds.has(layer.id) && selectedIds.size > 1) selectedIds.delete(layer.id); else selectedIds.add(layer.id);
   project.activeId = selectedIds.has(layer.id) ? layer.id : [...selectedIds].at(-1); setTarget(target); refresh(false); drawOverlay();
 }
-const viewport = $('viewport'), display = $('canvas'), overlay = $('overlay');
+const viewport = $('viewport'), display = $('canvas'), overlay = $('overlay'),recentPreview=canvas(1,1);
 const toolNames = { move: '移动工具', select: '矩形选区工具',objectSelect:'对象选择工具',quickSelect:'快速选择工具',wand:'魔棒工具', crop: '裁剪工具', gradient: '渐变工具', brush: '画笔工具', eraser: '橡皮擦工具', text: '文字工具', rect: '矩形工具', ellipse: '椭圆工具', eyedropper: '吸管工具', hand: '抓手工具' };
 const active = () => project.layers.find(layer => layer.id === project.activeId);
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
@@ -70,8 +71,7 @@ function updateTitle() {
   workspace?.capture();workspace?.render();
 }
 function snapshot() {
-  for (const layer of project.layers) for (const item of [layer, layer.mask]) if (item?.canvas && !item.data) item.data = item.canvas.toDataURL('image/png');
-  return serialize(project);
+  return serialize(project,true);
 }
 function checkpoint() { if(numericTransaction){if(!numericTransaction.pushed){history.push(numericTransaction.before);numericTransaction.pushed=true;}return;} history.push(snapshot()); }
 function changed(message) {
@@ -89,11 +89,12 @@ function newProject(width, height, background, title, resolution = 72, register=
   project = { width, height, resolution, colorSpace: 'sRGB',colorMode,...(profile?{colorProfile:profile}:{}), layers: [layer], activeId: layer.id };
   selection = cropRect = null; selectedIds.clear(); selectedIds.add(layer.id); setTarget('image');
   name = title || '未命名'; history=new History();path=sourcePath=null;transformSelected=true;api.commitDocument({kind:'activate',path:null});
-  resizeCanvas(); setDirty(false); fit(); render(); refresh();
+  resizeCanvas(); setDirty(false); fit(); refresh();
   if(register)workspace?.add();
 }
 function resizeCanvas() {
-  for (const c of [display, overlay]) { c.width = project.width; c.height = project.height; }
+  const ratio=Math.min(1,Math.sqrt(2*1024*1024/(project.width*project.height)));
+  for (const c of [display, overlay]) { c.width = Math.max(1,Math.round(project.width*ratio)); c.height = Math.max(1,Math.round(project.height*ratio));c.style.width=project.width+'px';c.style.height=project.height+'px'; }
   $('canvas-wrap').style.width = project.width + 'px'; $('canvas-wrap').style.height = project.height + 'px';
   $('dimensions').textContent = project.width + ' × ' + project.height + ' px · ' + Math.round(project.resolution) + ' ppi · '+(project.colorMode||'RGB');
   $('tab-size').textContent = project.width + ' × ' + project.height;
@@ -101,7 +102,7 @@ function resizeCanvas() {
 function applyView() {
   $('canvas-wrap').style.transform = 'translate(' + pan.x + 'px,' + pan.y + 'px) scale(' + zoom + ')';
   $('zoom-value').textContent = Math.round(zoom * 100) + '%';
-  drawRulers(project, zoom, pan); rulers?.update(); brushCursor?.update(); drawOverlay();
+  drawRulers(project, zoom, pan); rulers?.update(); brushCursor?.update(); render();
 }
 function fit() {
   zoom = Math.max(.05, Math.min((viewport.clientWidth - 96) / project.width, (viewport.clientHeight - 112) / project.height, 1));
@@ -113,9 +114,9 @@ function setZoom(value, center = { x: viewport.clientWidth / 2, y: viewport.clie
   pan = { x: center.x - (center.x - pan.x) * factor, y: center.y - (center.y - pan.y) * factor };
   zoom = next; applyView();
 }
-function render() { if(!documentOpen||workspace?.isHome())return;rulers?.update(); renderInto(display, project); drawOverlay(); typeEditor?.update(); }
+function render() { if(!documentOpen||workspace?.isHome())return;rulers?.update();renderPreview(display,project,undefined,true,{scale:zoom,pixelRatio:devicePixelRatio,pan,width:viewport.clientWidth,height:viewport.clientHeight});drawOverlay();typeEditor?.update(); }
 function drawOverlay() {
-  const ctx = overlay.getContext('2d'); ctx.clearRect(0, 0, overlay.width, overlay.height);
+  const ctx = overlay.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,overlay.width,overlay.height);ctx.scale(overlay.width/project.width,overlay.height/project.height);
   const layer = active();
   transformUI?.update();
   if (gesture?.kind !== 'move') snapping?.clear();
@@ -237,7 +238,7 @@ function refresh(rebuild = true) {
 }
 async function result(promise) { const response = await promise; if (!response.ok) throw new Error(response.error); return response.value; }
 async function save(saveAs = false) {
-  const output = await result(api.saveProject(snapshot(), saveAs));
+  const output = await result(api.saveProject(serialize(project), saveAs));
   if (!output) return false;
   name = output.name;path=output.path;setDirty(false);workspace?.remember(path);toast('项目已保存：' + output.path); return true;
 }
@@ -358,7 +359,7 @@ async function command(action,file=null) {
       if(opened.project.colorMode==='CMYK')await initColorProfile(opened.project.colorProfile.data);
       const loaded = await deserialize(opened.project);workspace.beginNew();documentOpen=true;document.body.classList.remove('no-document');project = loaded; name = opened.name; selection = cropRect = null;path=opened.source==='psd'?null:opened.path;sourcePath=opened.path;history=new History();transformSelected=true;
       selectedIds.clear(); selectedIds.add(project.activeId); setTarget('image');
-      api.commitDocument({kind:'activate',path});resizeCanvas();dirty=opened.source==='psd';fit();render();refresh();workspace.add();setDirty(dirty);workspace.remember(opened.path);$('canvas-tip').hidden = true;toast(opened.source === 'psd' ? 'PSD 已打开' + (opened.warnings.length ? '：' + opened.warnings.join('；') : '') : '项目已打开');
+      api.commitDocument({kind:'activate',path});resizeCanvas();dirty=opened.source==='psd';fit();refresh();workspace.add();setDirty(dirty);workspace.remember(opened.path);$('canvas-tip').hidden = true;toast(opened.source === 'psd' ? 'PSD 已打开' + (opened.warnings.length ? '：' + opened.warnings.join('；') : '') : '项目已打开');
     } else if (action === 'save' || action === 'saveAs') await save(action === 'saveAs');
     else if (action === 'import') await importImages(await result(api.importImages()));
     else if (action === 'export') $('export-dialog').showModal();
@@ -389,7 +390,7 @@ async function command(action,file=null) {
       checkpoint(); project.layers[project.layers.indexOf(old)] = next; changed('文字已栅格化，撤销可恢复可编辑文字');
     } else if (action === 'copyMerged') {
       const rect = selection || { x: 0, y: 0, width: project.width, height: project.height };
-      const copy = canvas(rect.width, rect.height); const ctx=copy.getContext('2d');ctx.drawImage(display, -rect.x, -rect.y);if(selection?.canvas){ctx.globalCompositeOperation='destination-in';ctx.drawImage(selection.canvas,0,0);}
+      const copy = canvas(rect.width, rect.height); const ctx=copy.getContext('2d');ctx.drawImage(composite(project), -rect.x, -rect.y);if(selection?.canvas){ctx.globalCompositeOperation='destination-in';ctx.drawImage(selection.canvas,0,0);}
       await result(api.copyImage(copy.toDataURL('image/png'))); toast('已将可见画面复制到 Windows 剪贴板');
     } else if (action === 'pasteImage') {
       const data = await result(api.pasteImage()); if (!data) { toast('剪贴板中没有图片。'); return; }
@@ -535,7 +536,7 @@ viewport.addEventListener('pointerdown', event => {
     }
     const layer = active();
     if (tool === 'eyedropper') {
-      const pixel = display.getContext('2d').getImageData(Math.floor(p.x), Math.floor(p.y), 1, 1).data;
+      const pixel = display.getContext('2d').getImageData(Math.floor((p.x-Number(display.dataset.originX||0))*display.width/Number(display.dataset.worldWidth||project.width)), Math.floor((p.y-Number(display.dataset.originY||0))*display.height/Number(display.dataset.worldHeight||project.height)), 1, 1).data;
       if (pixel[3]) {$('color').value = '#' + [...pixel].slice(0, 3).map(x => x.toString(16).padStart(2, '0')).join('');rememberColor($('color').value,'color');} colorSwatches();
       return;
     }
@@ -671,7 +672,7 @@ viewport.addEventListener('drop', async event => {
 document.querySelectorAll('[data-psd-choice]').forEach(b => b.onclick = () => $('psd-warning-dialog').close(b.dataset.psdChoice));
 setupColors(()=>editTarget==='mask');
 setupShell(command, setTool, refresh);
-selections=setupSelections({project:()=>project,active,display:()=>display,selection:()=>selection,set:value=>{selection=value;cropRect=null;drawOverlay();},tool:setTool,command,busy:value=>{setBusy(value);if(value)document.querySelector('.optionsbar').inert=false;},toast});
+selections=setupSelections({project:()=>project,active,display:()=>composite(project),selection:()=>selection,set:value=>{selection=value;cropRect=null;drawOverlay();},tool:setTool,command,busy:value=>{setBusy(value);if(value)document.querySelector('.optionsbar').inert=false;},toast});
 const cutout=setupCutout({project:()=>project,active,api,snapshot,get history(){return history;},capacity,changed,render,putSelection:(mask,layer,kind)=>selections.fromMask(mask,layer,kind),target:setTarget,toast,locked:l=>isLocked(project,l)});
 const fillEditor=setupFillEditor({project:()=>project,active,selection:()=>selection,api,snapshot,get history(){return history;},capacity,render,refresh,changed,toast});
 const layerStyles = setupLayerStyles({active,snapshot,get history(){return history;},changed,render,refresh,toast,locked:l=>isLocked(project,l)});
@@ -681,7 +682,7 @@ transformUI = setupTransformControls({active,project:()=>project,snapshot,get hi
 rulers=setupRulers({project:()=>project,open:()=>documentOpen,view:()=>({pan,zoom}),snapshot,get history(){return history;},checkpoint,changed,draw:()=>drawRulers(project,zoom,pan),busy:()=>busy||!!gesture,status:v=>$('status').textContent=v});
 snapping = setupSnapping({project:()=>project,selected:()=>selectedIds,snapshot,get history(){return history;},capacity,dirty:()=>dirty,setDirty,render,refresh,view:()=>({pan,zoom}),status:v=>$('status').textContent=v});
 $('show-transform').onchange = ()=>{if($('show-transform').checked)transformSelected=true;drawOverlay();};
-document.addEventListener('pointerdown',event=>{if(!documentOpen||busy||gesture||event.target.closest('.layer-row,#transform-controls,#show-transform,dialog'))return;const rect=display.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom){transformSelected=false;drawOverlay();}}); $('text-options').onclick = () => showPanel('properties');
+document.addEventListener('pointerdown',event=>{if(!documentOpen||busy||gesture||event.target.closest('.layer-row,#transform-controls,#show-transform,dialog'))return;const rect=$('canvas-wrap').getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom){transformSelected=false;drawOverlay();}}); $('text-options').onclick = () => showPanel('properties');
 for (const [id, key, divide] of [['mask-density', 'density', 100], ['mask-feather', 'feather', 1]]) $(id).addEventListener('change', () => {
   if (busy || !active().mask || !editable()) return; const value = Number($(id).value) / divide; if (!Number.isFinite(value)) return; checkpoint(); active().mask[key] = clamp(value, 0, key === 'density' ? 1 : 100); invalidatePixels(active().mask); changed();
 });
@@ -698,7 +699,7 @@ workspace=setupWorkspace({capture:()=>({project,name,dirty,path,sourcePath,histo
   restore:doc=>{setTarget('image');({project,name,dirty,path,sourcePath,history,zoom,pan,selection,cropRect,transformSelected}=doc);documentOpen=true;document.body.classList.remove('no-document');selectedIds.clear();doc.selected.forEach(id=>selectedIds.add(id));setTarget(doc.editTarget);api.commitDocument({kind:'activate',path});resizeCanvas();applyView();render();refresh();updateTitle();api.setDirty(workspace.hasDirty());},
   empty:()=>{documentOpen=false;selection=cropRect=null;history=new History();selectedIds.clear();dirty=false;api.commitDocument({kind:'activate',path:null});document.body.classList.add('no-document');$('layer-list').replaceChildren();$('layer-count').textContent='0 个图层';$('dimensions').textContent='';snapping.clear();brushCursor.update();},
   close:id=>{if(workspace.activate(id))command('closeDocument');},open:file=>command('open',file),
-  thumbnail:()=>{const thumb=canvas(240,150),ctx=thumb.getContext('2d'),ratio=Math.min(240/project.width,150/project.height);ctx.fillStyle='#282828';ctx.fillRect(0,0,240,150);ctx.drawImage(display,(240-project.width*ratio)/2,(150-project.height*ratio)/2,project.width*ratio,project.height*ratio);return thumb.toDataURL('image/jpeg',.7);}
+  thumbnail:()=>{const thumb=canvas(240,150),ctx=thumb.getContext('2d'),ratio=Math.min(240/project.width,150/project.height);renderPreview(recentPreview,project,undefined,true,{scale:ratio});ctx.fillStyle='#282828';ctx.fillRect(0,0,240,150);ctx.drawImage(recentPreview,(240-project.width*ratio)/2,(150-project.height*ratio)/2,project.width*ratio,project.height*ratio);return thumb.toDataURL('image/jpeg',.7);}
 });
 newProject(1280, 800, 'transparent', '未命名',72,false);documentOpen=false;document.body.classList.add('no-document');workspace.showHome();
 setTool('move');

@@ -7,6 +7,14 @@ const { validateProject } = require('../project.cjs');
 const { psdFixture, bitmap } = require('./psd-fixture.cjs');
 const toPNG = image => 'data:image/png;base64,' + PNG.sync.write({ width: image.width, height: image.height, data: Buffer.from(image.data) }).toString('base64');
 
+test('PSD 像素传输与 PNG 解码逐字节一致，并保留组和蒙版；临时传输不能直接保存',()=>{
+  const bytes=psdFixture(),encoded=readPsdDocument(bytes),raw=readPsdDocument(bytes,undefined,{rawPixels:true});
+  assert.equal(validateProject(raw.project,true),raw.project);assert.throws(()=>validateProject(raw.project));
+  assert.deepEqual(raw.project.layers.map(l=>[l.name,l.type,l.clipping]),encoded.project.layers.map(l=>[l.name,l.type,l.clipping]));
+  for(let n=0;n<raw.project.layers.length;n++)for(const [a,b] of [[raw.project.layers[n],encoded.project.layers[n]],[raw.project.layers[n].mask,encoded.project.layers[n].mask]])if(a?.pixels){const png=PNG.sync.read(Buffer.from(b.data.slice(22),'base64'));assert.equal(a.data,undefined);assert.deepEqual([a.pixels.width,a.pixels.height],[png.width,png.height]);assert.deepEqual(Buffer.from(a.pixels.data),png.data);}
+  const complex=readPsdDocument(psdFixture({children:[{name:'复杂混合',blendMode:'color dodge',imageData:bitmap(8,6,[10,20,30,255])}]}),undefined,{rawPixels:true});assert(complex.preview.layers[0].pixels);assert.equal(complex.preview.layers[0].data,undefined);
+});
+
 test('PSD 分层往返保留中文组、叠放顺序、剪贴关系、位置与灰度蒙版', () => {
   const { project, requiresFlatten } = readPsdDocument(psdFixture());
   assert.equal(requiresFlatten, false); assert.equal(project.resolution, 300);

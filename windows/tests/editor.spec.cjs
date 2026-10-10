@@ -166,7 +166,7 @@ test('纸张预设、单位和方向转换、保存预设、真实创建及分�
   await expect(page.locator('#new-size-preview')).toHaveText('3508 × 2480 像素 · 300 ppi');
   await page.locator('#create-document').click();
   await expect(page.locator('#new-dialog')).not.toBeVisible();
-  expect(await page.locator('#canvas').evaluate(c => [c.width, c.height])).toEqual([3508, 2480]);
+  expect(await page.locator('#canvas-wrap').evaluate(c => [parseInt(c.style.width), parseInt(c.style.height)])).toEqual([3508, 2480]);
   expect((await pixel(100, 100))[3]).toBe(0);
   const file = test.info().outputPath('打印项目.ccomp');
   await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, file);

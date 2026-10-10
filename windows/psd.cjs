@@ -49,8 +49,18 @@ function header(buffer) {
     offset += length + length % 2;
   }
 }
-function readPsdDocument(buffer,profile) {
+function readPsdDocument(buffer,profile,options = {}) {
   header(buffer);
+  const bitmapFields=(pixels,gray=false)=>{
+    if(!options.rawPixels)return {data:dataURL(pixels,gray)};
+    const data=pixels.data instanceof Uint8ClampedArray?pixels.data:new Uint8ClampedArray(pixels.data);
+    if(gray)for(let i=0;i<data.length;i+=4){data[i+1]=data[i+2]=data[i];data[i+3]=255;}
+    let left=pixels.width,top=pixels.height,right=-1,bottom=-1;
+    if(!gray)for(let y=0;y<pixels.height;y++)for(let x=0;x<pixels.width;x++)if(data[(y*pixels.width+x)*4+3]){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);}
+    const bounds=right<left?{x:0,y:0,width:pixels.width,height:pixels.height,empty:true}:{x:left,y:top,width:right-left+1,height:bottom-top+1};
+    return {pixels:{width:pixels.width,height:pixels.height,data,...(gray?{}:{bounds})}};
+  };
+  const validate=p=>validateProject(p,Boolean(options.rawPixels));
   const psd = readPsd(buffer, { useImageData: true, useRawData: true, skipThumbnail: true, skipLinkedFilesData: true, totalMemoryLimit: 512 * 1024 * 1024 });
   if(profile)require('./cmyk-psd.cjs').correctComposite(psd,buffer,profile);
   if (psd.imageResources?.pixelAspectRatio && psd.imageResources.pixelAspectRatio.aspect !== 1) throw new Error('当前只支持方形像素，请先转换 PSD 的像素长宽比。');
@@ -85,8 +95,8 @@ function readPsdDocument(buffer,profile) {
   if (!count) {
     const pixels = (profile?psd.imageData:getCompositeImageData(psd));
     if (!pixels) throw new Error('PSD 包含未支持的内容，且没有可用的合成预览。请先栅格化相关图层。');
-    const layer = { ...base('PSD 合成图', 'raster'), data: dataURL(pixels) }; project.layers = [layer]; project.activeId = layer.id;
-    return { project: validateProject(project), requiresFlatten: false, warnings: ['此 PSD 本身没有独立图层记录，已打开文件内的合成图。'], source: 'psd' };
+    const layer = { ...base('PSD 合成图', 'raster'), ...bitmapFields(pixels) }; project.layers = [layer]; project.activeId = layer.id;
+    return { project: validate(project), requiresFlatten: false, warnings: ['此 PSD 本身没有独立图层记录，已打开文件内的合成图。'], source: 'psd' };
   }
   const convert = (nodes, parentId = null) => {
     // ag-psd 31 stores siblings bottom-to-top; verify with independent recomposition.
@@ -95,7 +105,7 @@ function readPsdDocument(buffer,profile) {
       if (node.children) { l.collapsed = node.opened === false; convert(node.children, l.id); }
       else {
         const bitmap = profile?require('./cmyk-psd.cjs').correctLayer(node,profile):getLayerImageData(node);
-        l.data = bitmap ? dataURL(bitmap) : dataURL({ width: 1, height: 1, data: new Uint8Array(4) });
+        Object.assign(l,bitmapFields(bitmap || { width: 1, height: 1, data: new Uint8Array(4) }));
         if (node.text) {
           const t = node.text, style = t.style || t.styleRuns?.[0]?.style || {}, runs = t.styleRuns || [], matrix = t.transform || [1,0,0,1,0,0];
           let geometry;try{geometry=decompose(matrix.slice(0,4));}catch{} const axisUniform=Math.abs(matrix[1]||0)<.0001&&Math.abs(matrix[2]||0)<.0001&&Math.abs((matrix[0]||1)-(matrix[3]||1))<.0001;
@@ -106,30 +116,30 @@ function readPsdDocument(buffer,profile) {
             if(!axisUniform){l.fontSize=Math.max(1,Math.min(1000,style.fontSize||64));l.textGeometry={matrix:[...matrix]};}
             l.psdTextSource = t; l.textCacheOrigin = { x:l.x,y:l.y };
             if (l.textMode === 'paragraph') { l.boxWidth = Math.max(1, Math.min(16384, (t.boxBounds?.[2] - t.boxBounds?.[0]) || bitmap?.width || 300)); l.boxHeight = Math.max(1, Math.min(16384, (t.boxBounds?.[3] - t.boxBounds?.[1]) || bitmap?.height || 200)); }
-            if (!bitmap) { l.x = matrix[4] || 0; l.y = (matrix[5] || 0) - l.fontSize; delete l.data; }
+            if (!bitmap) { l.x = matrix[4] || 0; l.y = (matrix[5] || 0) - l.fontSize; delete l.data; delete l.pixels; }
             warnings.add('水平单样式文字保持可编辑；首次编辑会使用本机字体重新排版。');
           } else warnings.add(`「${l.name}」的混合样式、变形或竖排文字已单独转为像素层，其他图层保留。`);
         }
       }
       if (node.fillOpacity !== undefined) l.fillOpacity = node.fillOpacity;
       if (node.effects) { l.styles = importEffects(node.effects, resolution, warnings, l.name); l.stylesEnabled = !node.effects.disabled; l.psdEffects = node.effects; }
-      if(node.adjustment&&importAdjustment(node.adjustment)){warnings.add('调整图层已恢复为可编辑参数；部分色彩算法与 Photoshop 存在差异，请对照合成预览。');l.type='adjustment';l.adjustment=importAdjustment(node.adjustment);delete l.data;}
-      if(node.vectorFill&&importFill(node.vectorFill)&&!node.vectorMask){l.type='fill';l.fill=importFill(node.vectorFill);l.width=psd.width;l.height=psd.height;l.x=l.y=0;delete l.data;}
+      if(node.adjustment&&importAdjustment(node.adjustment)){warnings.add('调整图层已恢复为可编辑参数；部分色彩算法与 Photoshop 存在差异，请对照合成预览。');l.type='adjustment';l.adjustment=importAdjustment(node.adjustment);delete l.data;delete l.pixels;}
+      if(node.vectorFill&&importFill(node.vectorFill)&&!node.vectorMask){l.type='fill';l.fill=importFill(node.vectorFill);l.width=psd.width;l.height=psd.height;l.x=l.y=0;delete l.data;delete l.pixels;}
       if (node.adjustment&&!importAdjustment(node.adjustment)) warnings.add(`「${l.name}」调整图层保留为独立占位层，调整计算暂不支持，画面可能与 PS 不同。`);
       if (node.placedLayer) warnings.add(`「${l.name}」智能对象使用其独立缓存像素，仍是单独图层。`);
       if (node.vectorMask || node.vectorFill&&!importFill(node.vectorFill) || node.vectorStroke || node.realMask) warnings.add(`「${l.name}」的矢量或双重蒙版未完整重现，请对照合成预览。`);
       if (l.type === 'group' && l.clipping && l.blend === 'pass-through') l.blend = 'source-over';
       if (node.mask) {
         const bitmap = getLayerMaskImageData(node), color = node.mask.defaultColor ?? 255;
-        l.mask = { x: node.mask.left || 0, y: node.mask.top || 0, scale: 1, rotation: 0, defaultColor: color, enabled: !node.mask.disabled, linked: true, density: node.mask.userMaskDensity ?? 1, feather: Math.min(100, node.mask.userMaskFeather || 0), data: dataURL(bitmap || { width: 1, height: 1, data: new Uint8Array([color, color, color, 255]) }, true) };
+        l.mask = { x: node.mask.left || 0, y: node.mask.top || 0, scale: 1, rotation: 0, defaultColor: color, enabled: !node.mask.disabled, linked: true, density: node.mask.userMaskDensity ?? 1, feather: Math.min(100, node.mask.userMaskFeather || 0), ...bitmapFields(bitmap || { width: 1, height: 1, data: new Uint8Array([color, color, color, 255]) }, true) };
       }
       project.layers.push(l);
     }
   };
   convert(psd.children); project.activeId = project.layers.at(-1).id;
   let preview;
-  if (unsupported.size) { const bitmap = (profile?psd.imageData:getCompositeImageData(psd)); if (bitmap) preview = { ...project, layers: [{ ...base('PSD 合成图', 'raster'), data: dataURL(bitmap) }] }; if (preview) preview.activeId = preview.layers[0].id; }
-  return { project: validateProject(project), preview, warnings: [...unsupported].map(s => '含' + s + '：已保留图层，相关外观可能不同。').concat([...warnings]), source: 'psd', requiresFlatten: false, requiresConversion: unsupported.size > 0 };
+  if (unsupported.size) { const bitmap = (profile?psd.imageData:getCompositeImageData(psd)); if (bitmap) preview = { ...project, layers: [{ ...base('PSD 合成图', 'raster'), ...bitmapFields(bitmap) }] }; if (preview) preview.activeId = preview.layers[0].id; }
+  return { project: validate(project), preview, warnings: [...unsupported].map(s => '含' + s + '：已保留图层，相关外观可能不同。').concat([...warnings]), source: 'psd', requiresFlatten: false, requiresConversion: unsupported.size > 0 };
 }
 function writePsdDocument(project, composite) {
   validateProject(project); pngPixels(composite);

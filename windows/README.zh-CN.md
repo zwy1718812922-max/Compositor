@@ -1,19 +1,28 @@
 # Compositor 中文 Windows 版
 
-这是基于 [robbietilton/Compositor](https://github.com/robbietilton/Compositor) 制作的独立 Windows 核心功能移植，版本为 **0.7.0**。原版 SwiftUI / AppKit / Metal 程序保留在仓库中；Windows 轻量版使用系统 WebView2、WinForms 与 Canvas 2D，另保留 Electron 兼容版，在本机运行，不需要账号或联网编辑。
+这是基于 [robbietilton/Compositor](https://github.com/robbietilton/Compositor) 制作的独立 Windows 核心功能移植，版本为 **0.7.1**。原版 SwiftUI / AppKit / Metal 程序保留在仓库中；Windows 轻量版使用系统 WebView2、WinForms 与 Canvas 2D，另保留 Electron 兼容版，在本机运行，不需要账号或联网编辑。
 
 ## 直接运行
 
-- **轻量安装版（推荐）**：运行 `dist/Compositor-ZH-0.7.0-x64-Lite-Setup.exe`，中文向导安装到当前用户程序目录。
-- **轻量免安装版**：完整解压 `dist/Compositor-ZH-0.7.0-x64-Lite.zip`，双击 `lite-unpacked/Compositor 中文版.exe`。请保留同目录的 DLL、src、assets、ai 和 native 文件夹。
+- **轻量安装版（推荐）**：运行 `dist/Compositor-ZH-0.7.1-x64-Lite-Setup.exe`，中文向导安装到当前用户程序目录。
+- **轻量免安装版**：完整解压 `dist/Compositor-ZH-0.7.1-x64-Lite.zip`，双击 `lite-unpacked/Compositor 中文版.exe`。请保留同目录的 DLL、src、assets、ai 和 native 文件夹。
 - **本地直接启动**：双击仓库根目录 `启动中文版.cmd`，优先运行轻量版。
 - **Electron 兼容版**：运行 `dist/win-unpacked/Compositor 中文版.exe`；移动时保留整个文件夹。
 
-轻量安装包约 0.70 MB，ZIP 约 0.83 MB，安装后应用文件约 2.21 MB（十进制 MB，不包含系统运行时及用户数据）。复用本机 WebView2 和 .NET Framework 4.8+，不打包完整浏览器；Windows 11 通常已具备这些运行时，缺失时程序会提供安装提示。参考 [Microsoft WebView2 分发说明](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)。启动会立即显示动画；本机 0.7.0 WebView2 就绪测试约 0.64–0.84 秒，旧 0.4.0 自解压免安装 EXE 为 13.11 秒。其他电脑时间会不同。
+轻量安装包约 0.70 MB，ZIP 约 0.83 MB，安装后应用文件约 2.22 MB（十进制 MB，不包含系统运行时及用户数据）。复用本机 WebView2 和 .NET Framework 4.8+，不打包完整浏览器；Windows 11 通常已具备这些运行时，缺失时程序会提供安装提示。参考 [Microsoft WebView2 分发说明](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)。启动会立即显示动画；本机 0.7.1 安装版 WebView2 就绪测试约 0.63 秒，旧 0.4.0 自解压免安装 EXE 为 13.11 秒。其他电脑时间会不同。
 
 目标系统为 Windows 11 x64。安装包暂未使用商业代码签名证书签名；Windows 可能显示未知发布者提示。
 
 可通过“打开项目”载入 `examples/中文示例.ccomp`，体验包含可编辑中文文字、图层组和像素蒙版的示例。另有 examples/中文示例.psd 可用于分层交换。界面预览见 `preview.png`。
+
+## 0.7.1 性能修复
+
+- 直接读取 PSD 的图层像素及文字、组、蒙版、FX 元数据，去掉“逐层压缩 PNG，再解码”的导入中间步骤；轻量宿主使用一次性本地二进制通道，避免大文件转 Base64 JSON。
+- 大画布按显示比例和视口绘制；缓存未变化图层的 FX、蒙版与填充，纯色直接绘制。100% 显示按视口保留原始像素精度。保存、导出和复制合成画面使用完整文档尺寸，原始图层像素不缩小。
+- 撤销在内存里共享未变化的独立像素快照，避免拖动开始时编码整份 PNG；对未羽化蒙版的自动选择只取命中点像素，避免为一次点击计算整张蒙版。修复替换蒙版后旧缓存仍被使用的问题。
+- 本机 113.7 MB、3508 × 4961 的 36 节点展板：PSD 读取约 8.02 秒降至 1.31 秒，完整打开约 1.57 秒；真实拖动单次处理约 7–25 ms，选色约 5–7 ms。测试方法与限制见 [验证记录](VALIDATION.md)。
+
+PSD 仍需解码后进入编辑器，未使用 Photoshop 引擎；已有智能对象、复杂文字、颜色模式等兼容范围仍适用。工作项目保存为 `.ccomp`，分层 PSD 使用导出；没有无损改写任意 PSD 未知记录的能力。项目格式保持 v6，可继续打开旧文件。
 
 ## 0.7.0 新增操作
 

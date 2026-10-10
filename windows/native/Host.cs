@@ -32,6 +32,8 @@ internal sealed class StartupPanel : Panel {
     protected override void Dispose(bool disposing) { if(disposing)timer.Dispose();base.Dispose(disposing); }
 }
 internal sealed class EditorWindow : Form {
+    readonly Dictionary<string,string> imports = new Dictionary<string,string>();
+    readonly Dictionary<string,Stream> importStreams = new Dictionary<string,Stream>();
     const string Origin="https://compositor.local/",PageUrl=Origin+"src/index.html";
     const int MaxBytes=128*1024*1024;
     readonly WebView2 web=new WebView2();readonly StartupPanel splash=new StartupPanel();
@@ -47,7 +49,7 @@ internal sealed class EditorWindow : Form {
     static bool Flag(object value) { return value is bool && (bool)value; }
     static double Number(object value) { return Convert.ToDouble(value); }
     public EditorWindow() {
-        Text="Compositor 中文版 0.7.0"; ClientSize=new Size(1440,960);MinimumSize=new Size(1024,720);StartPosition=FormStartPosition.CenterScreen;
+        Text="Compositor 中文版 0.7.1"; ClientSize=new Size(1440,960);MinimumSize=new Size(1024,720);StartPosition=FormStartPosition.CenterScreen;
         FormBorderStyle=FormBorderStyle.None;BackColor=Color.FromArgb(38,38,38);Padding=new Padding(1);AutoScaleMode=AutoScaleMode.Dpi;
         MaximizedBounds=Screen.FromControl(this).WorkingArea;var icon=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"assets","icon.ico");if(File.Exists(icon))Icon=new Icon(icon);
         web.Dock=DockStyle.Fill;web.DefaultBackgroundColor=BackColor;Controls.Add(web);Controls.Add(splash);splash.BringToFront();
@@ -60,6 +62,15 @@ internal sealed class EditorWindow : Form {
             var options=new CoreWebView2EnvironmentOptions();options.Language="zh-CN";var port=Environment.GetEnvironmentVariable("COMPOSITOR_DEBUG_PORT");int debugPort;if(testing&&Int32.TryParse(port,out debugPort)&&debugPort>0&&debugPort<65536)options.AdditionalBrowserArguments="--remote-debugging-port="+debugPort;
             var environment=await CoreWebView2Environment.CreateAsync(null,profile,options);await web.EnsureCoreWebView2Async(environment);
             var core=web.CoreWebView2;core.SetVirtualHostNameToFolderMapping("compositor.local",AppDomain.CurrentDomain.BaseDirectory,CoreWebView2HostResourceAccessKind.DenyCors);
+            core.AddWebResourceRequestedFilter("https://compositor-import.local/_import/*",CoreWebView2WebResourceContext.All);
+            core.WebResourceRequested+=delegate(object sender,CoreWebView2WebResourceRequestedEventArgs e){
+                var token=new Uri(e.Request.Uri).AbsolutePath.Substring("/_import/".Length);string file;
+                if(e.Request.Method!="GET"||!imports.TryGetValue(token,out file)){e.Response=core.Environment.CreateWebResourceResponse(null,404,"Not Found","Cache-Control: no-store");return;}
+                imports.Remove(token);
+                try {var stream=File.OpenRead(file);importStreams[token]=stream;e.Response=core.Environment.CreateWebResourceResponse(stream,200,"OK","Content-Type: application/octet-stream\r\nAccess-Control-Allow-Origin: https://compositor.local\r\nCache-Control: no-store");}
+                catch {e.Response=core.Environment.CreateWebResourceResponse(null,404,"Not Found","Cache-Control: no-store");}
+            };
+            FormClosed+=delegate {foreach(var stream in importStreams.Values)stream.Dispose();importStreams.Clear();imports.Clear();};
             core.Settings.AreDefaultContextMenusEnabled=false;core.Settings.AreDevToolsEnabled=testing;core.Settings.IsStatusBarEnabled=false;core.Settings.IsZoomControlEnabled=false;
             core.Settings.IsGeneralAutofillEnabled=false;core.Settings.IsPasswordAutosaveEnabled=false;
             core.NavigationStarting+=delegate(object sender,CoreWebView2NavigationStartingEventArgs e){if(e.Uri!=PageUrl)e.Cancel=true;};
@@ -104,7 +115,8 @@ internal sealed class EditorWindow : Form {
             case "window:action":switch(StringValue(payload)){case "minimize":WindowState=FormWindowState.Minimized;break;case "maximize":WindowState=WindowState==FormWindowState.Maximized?FormWindowState.Normal:FormWindowState.Maximized;break;case "close":Close();break;default:throw new Exception("未知窗口操作。");}return true;
             case "project:open": {
                 var file=StringValue(payload);if(!String.IsNullOrEmpty(file)){if(!Path.IsPathRooted(file)||(!String.Equals(Path.GetExtension(file),".ccomp",StringComparison.OrdinalIgnoreCase)&&!String.Equals(Path.GetExtension(file),".psd",StringComparison.OrdinalIgnoreCase)))throw new Exception("最近项目路径无效。");}else file=OpenPath("项目和 Photoshop 文件|*.ccomp;*.psd|Compositor 项目|*.ccomp|Photoshop PSD|*.psd");if(file==null)return null;
-                var bytes=await Task.Run(()=>ReadBytes(file));var name=Path.GetFileNameWithoutExtension(file);if(Path.GetExtension(file).ToLowerInvariant()==".psd"){pendingPath=null;return new {source="psd",path=file,name,data=Convert.ToBase64String(bytes)};}
+                var name=Path.GetFileNameWithoutExtension(file);if(Path.GetExtension(file).ToLowerInvariant()==".psd"){if(new FileInfo(file).Length>MaxBytes)throw new Exception("文件超过 128 MB。");pendingPath=null;var token=Guid.NewGuid().ToString("N");imports.Clear();imports[token]=file;return new {source="psd",path=file,name,url="https://compositor-import.local/_import/"+token};}
+                var bytes=await Task.Run(()=>ReadBytes(file));
                 var project=Json().DeserializeObject(Encoding.UTF8.GetString(bytes));pendingPath=file;return new {project,path=file,name};
             }
             case "project:save": {
@@ -119,6 +131,7 @@ internal sealed class EditorWindow : Form {
             case "image:export": {
                 var format=Field(p,"format");if(format!="png"&&format!="jpeg")throw new Exception("图片格式无效。");var file=SavePath(format=="png"?"PNG 图片|*.png":"JPEG 图片|*.jpg",format=="png"?"作品.png":"作品.jpg");if(file==null)return null;var bytes=Convert.FromBase64String(Field(p,"data"));await Task.Run(()=>AtomicWrite(file,bytes));return file;
             }
+            case "project:release":{var token=StringValue(payload);Stream stream;if(token!=null&&importStreams.TryGetValue(token,out stream)){importStreams.Remove(token);stream.Dispose();}if(token!=null)imports.Remove(token);return true;}
             case "psd:select":exportPath=SavePath("Photoshop PSD|*.psd","作品.psd");return exportPath;
             case "psd:write": { if(exportPath==null||Field(p,"path")!=exportPath)throw new Exception("PSD 保存位置无效。");var file=exportPath;var bytes=Convert.FromBase64String(Field(p,"data"));await Task.Run(()=>AtomicWrite(file,bytes));exportPath=null;return file; }
             case "image:copy": {

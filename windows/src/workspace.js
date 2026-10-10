@@ -18,5 +18,5 @@ export function setupWorkspace(state){
  function remember(path){if(!path)return;const doc=state.capture(),preview=state.thumbnail();recents=[{path,name:doc.name,width:doc.project.width,height:doc.project.height,preview,modified:Date.now()},...recents.filter(r=>r.path.toLowerCase()!==path.toLowerCase())].slice(0,20);persist();}
  document.getElementById('show-home').onclick=()=>{if(state.canSwitch())showHome();};
  document.getElementById('home-back').onclick=()=>{if(current)activate(current);};
- return{add,capture,activate,remove,showHome,remember,render,documents,beginNew(){capture();current=null;},current:()=>current,isHome:()=>home,findPath:path=>documents.find(d=>[d.path,d.sourcePath].some(p=>p&&p.toLowerCase()===path.toLowerCase())),hasDirty(){capture();return documents.some(d=>d.dirty);}};
+ return{add,capture,activate,remove,showHome,remember,render,documents,beginNew(){capture();current=null;home=false;screen.hidden=true;document.body.classList.remove('home-visible');},current:()=>current,isHome:()=>home,findPath:path=>documents.find(d=>[d.path,d.sourcePath].some(p=>p&&p.toLowerCase()===path.toLowerCase())),hasDirty(){capture();return documents.some(d=>d.dirty);}};
 }
