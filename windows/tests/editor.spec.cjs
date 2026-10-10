@@ -35,6 +35,7 @@ async function drag(x1, y1, x2, y2) {
 }
 async function pixel(x, y) { return page.locator('#canvas').evaluate((c, p) => Array.from(c.getContext('2d').getImageData(p.x, p.y, 1, 1).data), { x, y }); }
 async function edit(id, value) {
+  if(id==='text-content'){if(!await page.locator('#inline-text').isVisible())await page.locator('.edit-text-button').click();await page.locator('#inline-text').fill(String(value));await page.locator('#inline-text').press('Control+Enter');return;}
   if (['layer-x', 'layer-y', 'layer-scale', 'layer-rotation', 'text-content', 'font-size'].includes(id)) await page.getByRole('button', { name: '属性面板', exact: true }).click();
   await page.locator('#' + id).fill(String(value)); await page.locator('#' + id).press('Tab');
 }
@@ -264,7 +265,7 @@ test('矩形选区限制填充、绘画和清除，支持变换图层及撤销',
 test('裁剪、画布锚点扩展、图像重采样保留文字、尺寸撤销和保存重开', async () => {
   await page.locator('#color').fill('#ff0000'); await menu('fillSelection');
   await page.locator('[data-tool=text]').click(); const p = await at(200, 200); await page.mouse.click(p.x, p.y);
-  await page.locator('#text-content').fill('尺寸修改后仍可编辑'); await page.locator('#text-content').press('Tab');
+  await edit('text-content','尺寸修改后仍可编辑');
   await page.locator('[data-tool=crop]').click(); await drag(100, 100, 740, 500);
   const rectSize = (await page.locator('#selection-size').textContent()).split(' × ').map(Number);
   await page.locator('#viewport').press('Enter');
@@ -329,7 +330,7 @@ test('选区渐变、向下合并、混合模式合并保持画面、文字栅�
   const blendBefore = await page.locator('#canvas').evaluate(c => c.toDataURL()); await menu('mergeVisible');
   await expect(page.locator('#layer-count')).toHaveText('1 个图层'); expect(await page.locator('#canvas').evaluate(c => c.toDataURL())).toBe(blendBefore);
   await page.locator('[data-tool=text]').click(); const p = await at(700, 450); await page.mouse.click(p.x, p.y);
-  await page.locator('#text-content').fill('中文栅格化'); await page.locator('#text-content').press('Tab');
+  await edit('text-content','中文栅格化');
   await page.locator('#canvas').evaluate(c => { window.testTextPixels = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; }); await menu('rasterize');
   await expect(page.locator('#layer-type')).toHaveText('像素图层');
   const diff = await page.locator('#canvas').evaluate(c => { const a = window.testTextPixels, b = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let count = 0, max = 0, x1 = c.width, y1 = c.height, x2 = 0, y2 = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) { count++; max = Math.max(max, Math.abs(a[i] - b[i])); const p = Math.floor(i / 4); x1 = Math.min(x1, p % c.width); y1 = Math.min(y1, Math.floor(p / c.width)); x2 = Math.max(x2, p % c.width); y2 = Math.max(y2, Math.floor(p / c.width)); } return { count, max, x1, y1, x2, y2 }; });
@@ -341,7 +342,7 @@ test('Windows 剪贴板复制选区并粘贴为图层，最小窗口工具可见
   await page.locator('#color').fill('#ff0000'); await menu('fillSelection');
   await page.locator('[data-tool=select]').click(); await drag(200, 200, 400, 300);
   const size = (await page.locator('#selection-size').textContent()).split(' × ').map(Number);
-  await app.evaluate(async ({ clipboard, ClipboardItem }) => { const items = await clipboard.read(); globalThis.testClipboardBackup = await Promise.all(items.map(async i => new ClipboardItem(Object.fromEntries(await Promise.all(i.types.map(async t => [t, await i.getType(t)])))))); });
+  await app.evaluate(async ({ clipboard, ClipboardItem }) => { const items = await clipboard.read(); globalThis.testClipboardBackup = await Promise.all(items.filter(i=>i.types.length).map(async i => new ClipboardItem(Object.fromEntries(await Promise.all(i.types.map(async t => [t, await i.getType(t)])))))); });
   try {
     await menu('copyMerged'); await expect(page.locator('#toast')).toContainText('剪贴板');
     expect(await app.evaluate(async ({ clipboard, nativeImage }) => { const items = await clipboard.read(), blob = await items[0].getType('image/png'); const p = nativeImage.createFromBuffer(Buffer.from(await blob.arrayBuffer())).getSize(); return [p.width, p.height]; })).toEqual(size);
@@ -453,6 +454,6 @@ test('移动自动选择按可见像素命中，变换控件开关与菜单键�
   await page.locator('#color').fill('#0000ff'); await drag(500,100,700,300); await page.locator('[data-tool=move]').click(); await page.locator('#auto-select').check();
   await drag(150,150,170,180); expect((await pixel(110,110))[3]).toBe(0); expect(await pixel(170,180)).toEqual([255,0,0,255]);
   await page.locator('#show-transform').uncheck(); expect(await page.locator('#overlay').evaluate(c => c.getContext('2d').getImageData(0,0,c.width,c.height).data.some(v=>v!==0))).toBe(false);
-  await page.getByRole('button',{name:'编辑(E)',exact:true}).click(); await expect(page.getByRole('menuitem',{name:'撤销 Ctrl+Z',exact:true})).toBeFocused(); await page.keyboard.press('Enter');
+  await page.getByRole('button',{name:'编辑(E)',exact:true}).click(); await expect(page.getByRole('menuitem',{name:'后退一步 Ctrl+Z',exact:true})).toBeFocused(); await page.keyboard.press('Enter');
   await expect.poll(async()=> (await pixel(110,110))[3]).toBe(255); await expect(page.locator('.app-menu')).toHaveCount(0);
 });

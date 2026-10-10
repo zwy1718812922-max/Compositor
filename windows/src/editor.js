@@ -8,7 +8,7 @@ export const MAX_PIXELS = 64 * 1024 * 1024;
 const revisions = new WeakMap(), historyPixels = new WeakMap();
 export const pixelRevision = bitmap => revisions.get(bitmap) || 0;
 export function canvas(width, height) {
-  const result = document.createElement('canvas');
+  const result = typeof document==='undefined' ? new OffscreenCanvas(width,height) : document.createElement('canvas');
   result.width = width; result.height = height;
   return result;
 }

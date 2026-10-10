@@ -2,7 +2,7 @@
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 !ifndef VERSION
-  !define VERSION "0.7.2"
+  !define VERSION "0.8.0"
 !endif
 Name "Compositor 中文版"
 OutFile "..\dist\Compositor-ZH-${VERSION}-x64-Lite-Setup.exe"

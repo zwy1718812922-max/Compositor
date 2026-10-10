@@ -16,13 +16,15 @@ export function previewRegion(project,view={}){
   width=Math.max(1,Math.ceil(right)-x);height=Math.max(1,Math.ceil(bottom)-y);
  }
  scale=Math.min(scale,Math.sqrt(MAX_PREVIEW_PIXELS/(width*height)));
+ // Returning to the same zoom should reuse FX surfaces despite floating-point drift.
+ scale=Math.max(.000001,Math.floor(scale*1000000+1e-8)/1000000);
  return{x,y,width,height,scale};
 }
 export function renderPreview(target,project,background,proof=true,view={}){
  const region=previewRegion(project,view),{scale}=region,key=JSON.stringify(region);
  let targets=states.get(project);if(!targets){targets=new WeakMap();states.set(project,targets);}let state=targets.get(target);
  if(!state||state.key!==key){state={key,layers:new Map(),cache:surfaceCache()};targets.set(target,state);}
- const layers=project.layers.map(layer=>{
+ const layers=project.layers.filter(layer=>layer.id!==view.editingId).map(layer=>{
   let proxy=state.layers.get(layer.id);if(!proxy){proxy={};state.layers.set(layer.id,proxy);}
   const oldBounds=proxy._bounds,oldBitmap=proxy.canvas,oldRevision=proxy._revision,oldMask=proxy.mask;
   for(const key of Object.keys(proxy))if(!key.startsWith('_'))delete proxy[key];
@@ -44,5 +46,6 @@ export function renderPreview(target,project,background,proof=true,view={}){
  target.dataset.originX=region.x;target.dataset.originY=region.y;target.dataset.worldWidth=region.width;target.dataset.worldHeight=region.height;
  const preview={...project,width,height,layers,_renderCache:state.cache};
  renderInto(target,preview,background,proof);
+ target.dataset.renderSerial=Number(target.dataset.renderSerial||0)+1;
  return region;
 }

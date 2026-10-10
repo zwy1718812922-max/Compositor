@@ -1,5 +1,9 @@
 import { affine, inverse } from './affine.mjs';
-import { setupColors, rememberColor } from './colors.js';
+import { setupColors, rememberColor, lastTextColor } from './colors.js';
+import { setupViewMotion } from './view-motion.js';
+import { copySelectionLayer } from './selection-copy.js';
+import { setupLayerMenu } from './layer-menu.js';
+import { setupPanels } from './panels.js';
 import { setupWorkspace } from './workspace.js';
 import { initColorProfile } from './color-engine.mjs';
 import { setupBlur } from './blur.js';
@@ -30,7 +34,7 @@ let zoom = 1, pan = { x: 0, y: 0 }, toastTimer;
 let selection = null, cropRect = null, sizeMode = 'image', adjustment = null, adjustmentFrame = null;
 let history = new History(),workspace,path=null,sourcePath=null;
 let editTarget = 'image'; const selectedIds = new Set();
-let savedColors = null;
+let savedColors = null, selectionAnchor=null,viewMotion,layerMenu,panels;
 let typeEditor, transformUI, snapping, fonts, brushCursor, rulers,selections, numericTransaction=null, documentOpen=true, transformSelected=true;
 const editSurface = () => editTarget === 'mask' && active().mask ? active().mask : active();
 function setTarget(target) {
@@ -43,11 +47,11 @@ function setTarget(target) {
   }
   editTarget = target; colorSwatches();
 }
-function selectLayer(layer, target = 'image', multiple = false) {
+function selectLayer(layer, target = 'image', multiple = false, range = false) {
   transformSelected=true;
   if (typeEditor?.editing && !typeEditor.owns(layer)) typeEditor.finish();
-  if (!multiple) selectedIds.clear();
-  if (multiple && selectedIds.has(layer.id) && selectedIds.size > 1) selectedIds.delete(layer.id); else selectedIds.add(layer.id);
+  if(range){const rows=[...$('layer-list').querySelectorAll('.layer-row')].map(row=>row.dataset.id),from=rows.indexOf(rows.includes(selectionAnchor)?selectionAnchor:project.activeId),to=rows.indexOf(layer.id);if(!multiple)selectedIds.clear();if(from>=0&&to>=0)rows.slice(Math.min(from,to),Math.max(from,to)+1).forEach(id=>selectedIds.add(id));else selectedIds.add(layer.id);}
+  else {if (!multiple) selectedIds.clear();if (multiple && selectedIds.has(layer.id) && selectedIds.size > 1) selectedIds.delete(layer.id); else selectedIds.add(layer.id);selectionAnchor=layer.id;}
   project.activeId = selectedIds.has(layer.id) ? layer.id : [...selectedIds].at(-1); setTarget(target); refresh(false); drawOverlay();
 }
 const viewport = $('viewport'), display = $('canvas'), overlay = $('overlay'),recentPreview=canvas(1,1);
@@ -56,7 +60,7 @@ const active = () => project.layers.find(layer => layer.id === project.activeId)
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 function setBusy(value) {
   busy = value; document.body.setAttribute('aria-busy', String(value));
-  document.querySelectorAll('.topbar,.optionsbar,main').forEach(element => { element.inert = value; });
+  document.querySelectorAll('.topbar,.optionsbar,main,.floating-panel').forEach(element => { element.inert = value; });
 }
 function toast(message) {
   $('toast').textContent = message; $('toast').hidden = false;
@@ -99,22 +103,23 @@ function resizeCanvas() {
   $('dimensions').textContent = project.width + ' × ' + project.height + ' px · ' + Math.round(project.resolution) + ' ppi · '+(project.colorMode||'RGB');
   $('tab-size').textContent = project.width + ' × ' + project.height;
 }
-function applyView() {
+function decorateView() {drawRulers(project,zoom,pan);rulers?.update();brushCursor?.update();drawOverlay();typeEditor?.update();}
+function applyView(interactive=false) {
   $('canvas-wrap').style.transform = 'translate(' + pan.x + 'px,' + pan.y + 'px) scale(' + zoom + ')';
   $('zoom-value').textContent = Math.round(zoom * 100) + '%';
-  drawRulers(project, zoom, pan); rulers?.update(); brushCursor?.update(); render();
+  if(interactive&&viewMotion)viewMotion.move();else{viewMotion?.cancel();decorateView();render();}
 }
-function fit() {
+function fit(interactive=false) {
   zoom = Math.max(.05, Math.min((viewport.clientWidth - 96) / project.width, (viewport.clientHeight - 112) / project.height, 1));
   pan = { x: (viewport.clientWidth - project.width * zoom) / 2, y: (viewport.clientHeight - project.height * zoom) / 2 };
-  applyView();
+  applyView(interactive);
 }
-function setZoom(value, center = { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 }) {
+function setZoom(value, center = { x: viewport.clientWidth / 2, y: viewport.clientHeight / 2 }, interactive=true) {
   const next = clamp(value, .05, 8), factor = next / zoom;
   pan = { x: center.x - (center.x - pan.x) * factor, y: center.y - (center.y - pan.y) * factor };
-  zoom = next; applyView();
+  zoom = next; applyView(interactive);
 }
-function render() { if(!documentOpen||workspace?.isHome())return;rulers?.update();renderPreview(display,project,undefined,true,{scale:zoom,pixelRatio:devicePixelRatio,pan,width:viewport.clientWidth,height:viewport.clientHeight});drawOverlay();typeEditor?.update(); }
+function render() { if(!documentOpen||workspace?.isHome())return;rulers?.update();const region=renderPreview(display,project,undefined,true,{scale:zoom,pixelRatio:devicePixelRatio,pan,width:viewport.clientWidth,height:viewport.clientHeight,editingId:typeEditor?.editing?active().id:undefined});viewMotion?.rendered(project,region);drawOverlay();typeEditor?.update(); }
 function drawOverlay() {
   const ctx = overlay.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,overlay.width,overlay.height);ctx.scale(overlay.width/project.width,overlay.height/project.height);
   const layer = active();
@@ -139,7 +144,7 @@ function setTool(next) {
   selections?.update(tool);
   $('move-options').hidden = tool !== 'move'; $('text-options').hidden = tool !== 'text';
   $('type-options').hidden = tool !== 'text';
-  if (tool === 'text' && active().type !== 'text') $('type-color').value = $('color').value;
+  if (tool === 'text' && active().type !== 'text') $('type-color').value = lastTextColor();
   const paint = ['brush', 'eraser', 'rect', 'ellipse', 'gradient'].includes(tool);
   $('tool-color-label').hidden = !paint; $('brush-size').closest('label').hidden = !['brush', 'eraser'].includes(tool);
   $('brush-hardness').closest('label').hidden = !['brush', 'eraser'].includes(tool); $('brush-opacity').closest('label').hidden = !paint;
@@ -170,7 +175,7 @@ function thumbnail(item, mask = false) {
   else if (item.type === 'text') thumb.textContent = 'T'; else thumb.append(icon(item.collapsed ? 'folder' : 'folder-open'));
   if (mask && !source.enabled) thumb.classList.add('disabled');
   thumb.title = mask ? '编辑图层蒙版（Shift 单击停用 / 启用）' : '编辑图层图像';
-  thumb.onclick = e => { e.stopPropagation(); if (busy) return; selectLayer(item, mask ? 'mask' : 'image', e.ctrlKey); if (mask && e.shiftKey) command('toggleMask'); };
+  thumb.onclick = e => { e.stopPropagation(); if (busy) return; selectLayer(item, mask ? 'mask' : 'image', e.ctrlKey,!mask&&e.shiftKey); if (mask && e.shiftKey) command('toggleMask'); };
   if(!mask&&['fill','adjustment'].includes(item.type)){thumb.textContent=item.type==='fill'?'◩':'◐';thumb.style.background=item.fill?.color||'#555';thumb.ondblclick=e=>{e.stopPropagation();if(!busy)fillEditor.open(item);};}
   if (!mask && item.type === 'text') thumb.ondblclick = e => { e.stopPropagation(); if (!busy) typeEditor.begin(item); };
   return thumb;
@@ -189,7 +194,7 @@ function refresh(rebuild = true) {
   $('edit-target-label').textContent = editTarget === 'mask' ? '正在编辑：图层蒙版' : '';
   for (const el of document.querySelectorAll('.properties input,.properties select,.properties textarea,#blend,#layer-opacity,#bold')) el.disabled = locked;
   if (['group','adjustment'].includes(layer.type) && editTarget !== 'mask') ['layer-x', 'layer-y', 'layer-scale', 'layer-scale-y','layer-rotation'].forEach(id => $(id).disabled = true);
-  if (layer.type === 'text') { $('text-content').value = layer.text; if (![...$('font').options].some(o => o.value === layer.font)) $('font').add(new Option(layer.font,layer.font)); $('font').value = layer.font; $('font-size').value = layer.fontSize; $('text-color').value = layer.color; $('bold').classList.toggle('active', layer.bold); $('text-leading').value = layer.lineHeight || 1.35; $('text-spacing').value = layer.letterSpacing || 0; }
+  if (layer.type === 'text') { if (![...$('font').options].some(o => o.value === layer.font)) $('font').add(new Option(layer.font,layer.font)); $('font').value = layer.font; $('font-size').value = layer.fontSize; $('text-color').value = layer.color; $('bold').classList.toggle('active', layer.bold); $('text-leading').value = layer.lineHeight || 1.35; $('text-spacing').value = layer.letterSpacing || 0; }
   fonts?.update(); if(layer.type==='text'){ $('font-style').value=`${layer.bold?700:layer.fontWeight||400}:${!!layer.italic}`;$('italic').classList.toggle('active',!!layer.italic);$('underline').classList.toggle('active',!!layer.underline);document.querySelectorAll('[data-align]').forEach(b=>b.classList.toggle('active',b.dataset.align===(layer.align||'left')));}
   typeEditor?.update();
   $('mask-empty').hidden = !!layer.mask; $('mask-controls').hidden = !layer.mask;
@@ -218,7 +223,8 @@ function refresh(rebuild = true) {
         }; info.append(title); row.append(info);
         if (hasEffects(item)) { const fx = document.createElement('button'); fx.className = 'fx-badge'; fx.textContent = 'fx'; fx.setAttribute('aria-label',item.name+'的图层样式'); fx.onclick = e => { e.stopPropagation(); selectLayer(item); command('layerStyles'); }; row.append(fx); }
         const lock = document.createElement('button'); lock.append(icon(item.locked ? 'lock' : 'lock-open')); lock.title = item.locked ? '解锁图层' : '锁定图层'; lock.setAttribute('aria-label', lock.title); lock.onclick = e => { e.stopPropagation(); if (busy) return; checkpoint(); item.locked = !item.locked; changed(); }; row.append(lock);
-        row.onclick = e => { if (!busy) selectLayer(item, 'image', e.ctrlKey); }; row.tabIndex = 0; row.onkeydown = e => { if (e.key === 'Enter') selectLayer(item, 'image', e.ctrlKey); };
+        row.onclick = e => { if (!busy) selectLayer(item, 'image', e.ctrlKey,e.shiftKey); }; row.tabIndex = 0; row.onkeydown = e => { if (e.key === 'Enter') selectLayer(item, 'image', e.ctrlKey,e.shiftKey); };
+        row.oncontextmenu=e=>layerMenu.open(item,e);
         row.ondragstart = e => { if (busy || isLocked(project, item)) { e.preventDefault(); return; } e.dataTransfer.setData('application/x-compositor-layer', item.id); e.dataTransfer.effectAllowed = 'move'; };
         row.ondragover = e => { if (e.dataTransfer.types.includes('application/x-compositor-layer')) { e.preventDefault(); row.classList.add('dragover'); } }; row.ondragleave = () => row.classList.remove('dragover');
         row.ondrop = e => {
@@ -334,15 +340,18 @@ async function command(action,file=null) {
   if (action === 'selectAll' && document.activeElement?.matches('input,textarea')) { document.activeElement.select(); return; }
   if (typeEditor?.editing && ['undo','redo'].includes(action) && document.activeElement?.matches('input,textarea')) { document.execCommand(action); return; }
   if (busy || gesture || document.querySelector('dialog[open]')) return;
-  if((!documentOpen||workspace?.isHome())&&!['new','open','close','help'].includes(action)&&!action.startsWith('panel'))return;
+  if((!documentOpen||workspace?.isHome())&&!['new','open','close','help','resetPanels'].includes(action)&&!action.startsWith('panel'))return;
   if (typeEditor?.editing) typeEditor.finish();
   // Commit a pending text change before a menu accelerator operates on it.
   if (document.activeElement?.matches('input,textarea,select')) document.activeElement.blur();
   setBusy(true);
   document.body.dataset.commandSerial = String(Number(document.body.dataset.commandSerial || 0) + 1);
   try {
+    if(action==='duplicate'&&selection){const layer=copySelectionLayer(project,active(),selection);capacity(layer.canvas.width,layer.canvas.height);checkpoint();project.layers.splice(project.layers.indexOf(active())+1,0,layer);canonicalize(project);project.activeId=layer.id;selectedIds.clear();selectedIds.add(layer.id);selection=null;setTarget('image');changed('已将选区内的内容复制为新图层');return;}
+    if(action==='editText'){if(active().type==='text')typeEditor.begin(active());return;}
+    if(action==='resetPanels'){panels.reset();return;}
     if (advancedCommand(action, { project, checkpoint, changed, toast, capacity, selected: selectedIds, target: editTarget, setTarget, selection })) return;
-    if (action.startsWith('panel')) { showPanel(action.slice(5).toLowerCase()); return; }
+    if (action.startsWith('panel')) { panels.show(action.slice(5).toLowerCase()); return; }
     if (action === 'toggleSnap') { snapping.toggle(); return; }
     if(rulers?.command(action))return;
     if(action==='createFill'){fillEditor.menu();return;}
@@ -396,7 +405,7 @@ async function command(action,file=null) {
       const data = await result(api.pasteImage()); if (!data) { toast('剪贴板中没有图片。'); return; }
       await importImages([{ name: '剪贴板图片', data }]);
     } else if (action === 'undo' || action === 'redo') await travel(action === 'undo');
-    else if (action === 'fit') fit();
+    else if (action === 'fit') fit(true);
     else if (action === 'actual') setZoom(1);
     else if (action === 'closeDocument') { if(await mayReplace()){dirty=false;workspace.remove();setDirty(documentOpen?dirty:false);} }
     else if (action === 'close') {const original=workspace.current();for(const doc of [...workspace.documents]){workspace.activate(doc.id,true);if(!await mayReplace()){if(original)workspace.activate(original,true);return;}dirty=false;workspace.capture();}api.setDirty(false);api.close();}
@@ -406,7 +415,7 @@ async function command(action,file=null) {
       layer.parentId = active().type === 'group' ? active().id : active().parentId || null; project.layers.push(layer); canonicalize(project); project.activeId = layer.id; setTarget('image'); changed('已新建透明图层');
     }
   } catch (error) { toast(error.message || '操作失败，请重试。'); }
-  finally { setBusy(false); }
+  finally { setBusy(false);if(action==='editText'&&typeEditor.editing)$('inline-text').focus(); }
 }
 api.onCommand(command);
 document.querySelectorAll('[data-command]').forEach(button => button.onclick = () => command(button.dataset.command));
@@ -486,22 +495,13 @@ updateProperty('blend', 'blend');
 updateProperty('font', 'font'); updateProperty('font-size', 'fontSize', numeric(1, 1000));
 updateProperty('text-color', 'color');
 updateProperty('text-leading','lineHeight',numeric(.5,5)); updateProperty('text-spacing','letterSpacing',numeric(-100,1000));
-let textSession = false;
-$('text-content').addEventListener('focus', () => { textSession = false; });
-$('text-content').addEventListener('input', () => {
-  if (busy || isLocked(project, active()) || active().type !== 'text' || active().text === $('text-content').value) return;
-  if (!textSession && !typeEditor.owns(active())) { checkpoint(); textSession = true; }
-  clearTextCache(active());
-  active().text = $('text-content').value; setDirty(true); render();
-  $('undo').disabled = false; $('redo').disabled = true;
-});
 $('bold').onclick = () => { if (active().type !== 'text' || isLocked(project, active()) || busy) return; if (!typeEditor.owns(active())) checkpoint(); clearTextCache(active()); active().bold = !active().bold;active().fontWeight=active().bold?700:400; changed(); };
 $('brush-opacity').oninput = () => $('brush-opacity-value').textContent = $('brush-opacity').value + '%';
 $('zoom-in').onclick = () => setZoom(zoom * 1.25); $('zoom-out').onclick = () => setZoom(zoom / 1.25);
 viewport.addEventListener('wheel', event => {
   event.preventDefault(); if (gesture) return;
   const rect = viewport.getBoundingClientRect();
-  setZoom(zoom * Math.exp(-event.deltaY * .0015), { x: event.clientX - rect.left, y: event.clientY - rect.top });
+  setZoom(zoom * Math.exp(-event.deltaY * .0015), { x: event.clientX - rect.left, y: event.clientY - rect.top },true);
 }, { passive: false });
 function point(event) {
   const rect = viewport.getBoundingClientRect();
@@ -583,7 +583,7 @@ function gradientPath(ctx, g) {
 viewport.addEventListener('pointermove', event => {
   if (!gesture) return;
   const g = gesture, p = point(event);
-  if (g.kind === 'pan') { pan = { x: g.pan.x + event.clientX - g.startX, y: g.pan.y + event.clientY - g.startY }; applyView(); }
+  if (g.kind === 'pan') { pan = { x: g.pan.x + event.clientX - g.startX, y: g.pan.y + event.clientY - g.startY }; applyView(true); }
   else if (g.kind === 'transform') { try { transformUI.move(g,p,event.shiftKey); } catch (error) { toast(error.message); } }
   else if(g.kind==='pixelSelect')selections.move(g,p);
   else if (g.kind === 'move') {
@@ -626,17 +626,21 @@ function finishGesture(event) {
       if (!g.mask) { layer.parentId = active().type === 'group' ? active().id : active().parentId || null; project.layers.push(layer); canonicalize(project); project.activeId = layer.id; setTarget('image'); } else invalidatePixels(layer); changed(g.mask ? '已更新蒙版' : '已创建' + layer.name + '图层');
     } else drawOverlay();
   } else if (g.kind !== 'pan' && (g.kind !== 'move' || g.committed)) changed();
+  if(g.kind==='pan'||viewport.dataset.viewUpdating==='true')applyView(true);
 }
 viewport.addEventListener('pointerup', finishGesture); viewport.addEventListener('pointercancel', finishGesture);
 window.addEventListener('blur', () => { space = false; finishGesture(); });
 window.addEventListener('keydown', event => {
   if (['transform','move'].includes(gesture?.kind) && event.key === 'Escape') { event.preventDefault(); const g = gesture; gesture = null; (g.kind === 'move' ? snapping : transformUI).cancel(g); return; }
+  if(event.defaultPrevented)return;
+  if(event.ctrlKey&&!event.isComposing){const input=event.target.matches('input,textarea,select'),letter=event.key.toLowerCase();if(input&&['a','c','x','v','z','y'].includes(letter)&&!event.shiftKey)return;const key=(event.shiftKey?'shift+':'')+(event.altKey?'alt+':'')+letter,commands={n:'new',w:'closeDocument',r:'toggleRulers',';':'toggleGuides',o:'open',i:'import',s:'save','shift+s':'saveAs','shift+e':'export',z:'undo','shift+z':'redo',y:'redo',j:'duplicate',g:'group','shift+g':'ungroup','alt+g':'clipping',t:'freeTransform',e:'mergeDown','shift+m':'mergeVisible',a:'selectAll',d:'deselect','0':'fit','1':'actual','shift+c':'copyMerged','shift+v':'pasteImage','shift+n':'addLayer'};if(commands[key]){event.preventDefault();command(commands[key]);return;}}
   if(!event.defaultPrevented&&event.ctrlKey&&event.key.toLowerCase()==='w'){event.preventDefault();command('closeDocument');return;}
   if(!documentOpen||workspace?.isHome())return;
   if (event.isComposing || event.target.matches('input,textarea,select') || event.target.closest('[role=menu]') || document.querySelector('dialog[open]')) return;
   if (event.code === 'Space') { event.preventDefault(); space = true; return; }
-  // Menu accelerators own Ctrl combinations in Electron.
+  if(event.shiftKey&&event.key==='F5'){event.preventDefault();command('fillSelection');return;}
   if (event.ctrlKey || event.metaKey || event.altKey || busy || gesture) return;
+  if(['brush','eraser'].includes(tool)&&(event.code==='BracketLeft'||event.code==='BracketRight'||['[',']','【','】'].includes(event.key))){event.preventDefault();const input=$('brush-size'),old=Number(input.value),step=old<10?1:old<100?5:old<200?10:25,direction=event.code==='BracketLeft'||['[','【'].includes(event.key)?-1:1;input.value=clamp(old+step*direction,1,500);input.dispatchEvent(new Event('input',{bubbles:true}));brushCursor.update();return;}
   const shortcuts = { w:'objectSelect',v: 'move', m: 'select', c: 'crop', g: 'gradient', b: 'brush', e: 'eraser', t: 'text', u: 'rect', o: 'ellipse', i: 'eyedropper', h: 'hand' };
   if (shortcuts[event.key.toLowerCase()]) setTool(shortcuts[event.key.toLowerCase()]);
   if (event.key.toLowerCase() === 'x') $('swap-colors').click();
@@ -673,11 +677,15 @@ document.querySelectorAll('[data-psd-choice]').forEach(b => b.onclick = () => $(
 setupColors(()=>editTarget==='mask');
 setupShell(command, setTool, refresh);
 selections=setupSelections({project:()=>project,active,display:()=>composite(project),selection:()=>selection,set:value=>{selection=value;cropRect=null;drawOverlay();},tool:setTool,command,busy:value=>{setBusy(value);if(value)document.querySelector('.optionsbar').inert=false;},toast});
-const cutout=setupCutout({project:()=>project,active,api,snapshot,get history(){return history;},capacity,changed,render,putSelection:(mask,layer,kind)=>selections.fromMask(mask,layer,kind),target:setTarget,toast,locked:l=>isLocked(project,l)});
+const cutout=setupCutout({project:()=>project,active,api,command,snapshot,get history(){return history;},capacity,changed,render,putSelection:(mask,layer,kind)=>selections.fromMask(mask,layer,kind),target:setTarget,toast,locked:l=>isLocked(project,l)});
+viewMotion=setupViewMotion({display,viewport,project:()=>project,gesture:()=>gesture,decorate:decorateView,render,view:()=>({scale:zoom,pixelRatio:devicePixelRatio,pan:{...pan},width:viewport.clientWidth,height:viewport.clientHeight}),editingId:()=>typeEditor?.editing?active().id:undefined});
+layerMenu=setupLayerMenu({select:l=>{if(!selectedIds.has(l.id))selectLayer(l);else{project.activeId=l.id;setTarget('image');refresh(false);drawOverlay();}},command,busy:()=>busy||!!gesture,focus:()=>viewport.focus()});
+panels=setupPanels();
+viewport.addEventListener('contextmenu',event=>{if(!documentOpen||workspace?.isHome()||event.target.closest('#inline-text'))return;const found=hitLayer(project,point(event));if(found)layerMenu.open(found,event);else event.preventDefault();});
 const fillEditor=setupFillEditor({project:()=>project,active,selection:()=>selection,api,snapshot,get history(){return history;},capacity,render,refresh,changed,toast});
 const layerStyles = setupLayerStyles({active,snapshot,get history(){return history;},changed,render,refresh,toast,locked:l=>isLocked(project,l)});
 const blur=setupBlur({active,selection:()=>selection,snapshot,history:()=>history,render,changed,toast,locked:l=>isLocked(project,l)});
-typeEditor = setupTypeEditor({active,project:()=>project,snapshot,get history(){return history;},dirty:()=>dirty,setDirty,changed,render,refresh,checkpoint,capacity,select:selectLayer,tool:setTool,status:v=>$('status').textContent=v,focus:()=>viewport.focus(),locked:l=>isLocked(project,l)});
+typeEditor = setupTypeEditor({active,project:()=>project,point,snapshot,get history(){return history;},dirty:()=>dirty,setDirty,changed,render,refresh,checkpoint,capacity,select:selectLayer,tool:setTool,status:v=>$('status').textContent=v,focus:()=>viewport.focus(),locked:l=>isLocked(project,l)});
 transformUI = setupTransformControls({active,project:()=>project,snapshot,get history(){return history;},dirty:()=>dirty,setDirty,render,refresh,point,target:()=>editTarget,selected:()=>selectedIds,view:()=>({pan,zoom}),busy:()=>busy||!!gesture,show:()=>documentOpen&&transformSelected&&$('show-transform').checked && ['move','text'].includes(tool) && !typeEditor.editing&&!document.querySelector('dialog[open]'),status:v=>$('status').textContent=v,begin:(event,g)=>{gesture=g;viewport.setPointerCapture(event.pointerId);viewport.focus();}});
 rulers=setupRulers({project:()=>project,open:()=>documentOpen,view:()=>({pan,zoom}),snapshot,get history(){return history;},checkpoint,changed,draw:()=>drawRulers(project,zoom,pan),busy:()=>busy||!!gesture,status:v=>$('status').textContent=v});
 snapping = setupSnapping({project:()=>project,selected:()=>selectedIds,snapshot,get history(){return history;},capacity,dirty:()=>dirty,setDirty,render,refresh,view:()=>({pan,zoom}),status:v=>$('status').textContent=v});
@@ -691,9 +699,9 @@ new ResizeObserver(() => { if (project) drawRulers(project, zoom, pan); }).obser
 brushCursor=setupBrushCursor({tool:()=>tool,zoom:()=>zoom,busy:()=>busy,open:()=>documentOpen,space:()=>space});
 fonts=setupFonts(api,refresh,toast);
 setupNumericScrubbing({busy:()=>busy||!!gesture,begin:input=>{if(!documentOpen||input.closest('dialog'))return null;numericTransaction={before:snapshot(),dirty,undo:[...history.undoStack],redo:[...history.redoStack],pushed:false};return numericTransaction;},end:async(cancel,transaction)=>{numericTransaction=null;if(cancel&&transaction?.pushed){project=await deserialize(transaction.before);history.undoStack=transaction.undo;history.redoStack=transaction.redo;setDirty(transaction.dirty);render();refresh();}}});
-$('font-style').onchange=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;checkpoint();clearTextCache(active());const [weight,italic]=$('font-style').value.split(':');Object.assign(active(),{fontWeight:Number(weight),bold:Number(weight)>=700,italic:italic==='true'});changed();};
-for(const [id,key] of [['italic','italic'],['underline','underline']])$(id).onclick=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;checkpoint();clearTextCache(active());active()[key]=!active()[key];changed();};
-document.querySelectorAll('[data-align]').forEach(b=>b.onclick=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;checkpoint();clearTextCache(active());active().align=b.dataset.align;changed();});
+$('font-style').onchange=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;if(!typeEditor.owns(active()))checkpoint();clearTextCache(active());const [weight,italic]=$('font-style').value.split(':');Object.assign(active(),{fontWeight:Number(weight),bold:Number(weight)>=700,italic:italic==='true'});changed();};
+for(const [id,key] of [['italic','italic'],['underline','underline']])$(id).onclick=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;if(!typeEditor.owns(active()))checkpoint();clearTextCache(active());active()[key]=!active()[key];changed();};
+document.querySelectorAll('[data-align]').forEach(b=>b.onclick=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;if(!typeEditor.owns(active()))checkpoint();clearTextCache(active());active().align=b.dataset.align;changed();});
 workspace=setupWorkspace({capture:()=>({project,name,dirty,path,sourcePath,history,zoom,pan:{...pan},selection,cropRect,editTarget,selected:[...selectedIds],transformSelected}),
   canSwitch:()=>!busy&&!gesture&&!document.querySelector('dialog[open]')&&!typeEditor.editing,
   restore:doc=>{setTarget('image');({project,name,dirty,path,sourcePath,history,zoom,pan,selection,cropRect,transformSelected}=doc);documentOpen=true;document.body.classList.remove('no-document');selectedIds.clear();doc.selected.forEach(id=>selectedIds.add(id));setTarget(doc.editTarget);api.commitDocument({kind:'activate',path});resizeCanvas();applyView();render();refresh();updateTitle();api.setDirty(workspace.hasDirty());},
@@ -704,5 +712,5 @@ workspace=setupWorkspace({capture:()=>({project,name,dirty,path,sourcePath,histo
 newProject(1280, 800, 'transparent', '未命名',72,false);documentOpen=false;document.body.classList.add('no-document');workspace.showHome();
 setTool('move');
 setBusy(false);
-new ResizeObserver(() => { if (project && !gesture) fit(); }).observe(viewport);
+new ResizeObserver(() => { if (project && !gesture) applyView(true); }).observe(viewport);
 requestAnimationFrame(() => requestAnimationFrame(() => { $('startup-screen').hidden = true; api.rendererReady?.(); }));

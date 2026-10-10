@@ -1,5 +1,5 @@
 import { hasEffects, defaultEffect } from './effect-model.mjs';
-const bitmap = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const bitmap = (w, h) => { const c = typeof document==='undefined' ? new OffscreenCanvas(w,h) : document.createElement('canvas'); c.width = w; c.height = h; return c; };
 const rgb = color => color.slice(1).match(/../g).map(v => parseInt(v, 16));
 const clamp = v => Math.max(0, Math.min(1, v));
 function blend(b, s, mode) {

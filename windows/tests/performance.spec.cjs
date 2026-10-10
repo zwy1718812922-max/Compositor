@@ -2,6 +2,23 @@ const {test,expect,_electron:electron}=require('@playwright/test'),path=require(
 let app,page;
 test.beforeEach(async()=>{const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const args=['--user-data-dir='+test.info().outputPath('profile')];app=await electron.launch(process.env.COMPOSITOR_EXECUTABLE?{executablePath:process.env.COMPOSITOR_EXECUTABLE,args,env}:{args:[path.join(__dirname,'..'),...args],env});page=await app.firstWindow();await expect(page.locator('#startup-screen')).toBeHidden();});
 test.afterEach(async()=>{if(app){await app.evaluate(({app})=>app.exit(0));await app.close();}});
+test('后台预览与同步合成一致，支持文字、FX、蒙版、剪贴和删除撤销后的像素更新',async()=>{
+ const result=await page.evaluate(async()=>{
+  const e=await import('./editor.js'),{renderPreview}=await import('./render-preview.js'),{setupBackgroundPreview}=await import('./background-preview.js'),{defaultEffect}=await import('./effect-model.mjs'),background=setupBackgroundPreview();
+  const group=e.groupLayer('组');group.opacity=.6;
+  const base=e.rasterLayer('底层',200,160,'#dd4400');Object.assign(base,{x:200,y:150,parentId:group.id,styles:{stroke:{...defaultEffect('stroke'),enabled:true,size:6,color:'#00ff00'}}});
+  const mask=e.rasterLayer('蒙版',200,160,'white');Object.assign(mask,{x:200,y:150,density:.8,feather:1,enabled:true,defaultColor:0});base.mask=mask;
+  const upper=e.rasterLayer('剪贴',100,160,'#0000ff');Object.assign(upper,{x:200,y:150,clipping:true,parentId:group.id,opacity:.5});
+  const text=e.textLayer('中文文字',450,150,'#118844');text.fontSize=42;
+  const fill={...e.baseLayer('图案','fill'),width:2400,height:1600,fill:{kind:'pattern',pattern:'stripes',color:'#ffffff',color2:'#cccccc',scale:100}};
+  const p={width:2400,height:1600,colorMode:'RGB',layers:[fill,base,upper,group,text]},view={scale:1,pixelRatio:1,pan:{x:-100,y:-100},width:800,height:500},differences=[];
+  async function verify(){const expected=e.canvas(1,1),region=renderPreview(expected,p,undefined,true,view),r=await background.render(p,view),actual=e.canvas(r.bitmap.width,r.bitmap.height);actual.getContext('2d').drawImage(r.bitmap,0,0);r.bitmap.close();const a=actual.getContext('2d').getImageData(0,0,actual.width,actual.height).data,b=expected.getContext('2d').getImageData(0,0,expected.width,expected.height).data;let max=0;for(let i=0;i<a.length;i++)max=Math.max(max,Math.abs(a[i]-b[i]));differences.push({max,regionMatch:JSON.stringify(r.region)===JSON.stringify(region)});}
+  await verify();base.canvas.getContext('2d').fillStyle='#eeaa00';base.canvas.getContext('2d').fillRect(0,0,200,160);e.invalidatePixels(base);await verify();p.layers=p.layers.filter(l=>l!==base&&l!==upper);await verify();p.layers.unshift(base,upper);await verify();mask.canvas=e.canvas(200,160);await verify();
+  const profile=await window.desktop.colorProfile('system'),{initColorProfile}=await import('./color-engine.mjs');await initColorProfile(profile.value);p.colorMode='CMYK';p.colorProfile={data:profile.value};await verify();
+  background.clear();await verify();const cancelled=await background.render(p,view,()=>false);return{differences,cancelled};
+ });
+ expect(result.cancelled).toBeNull();for(const difference of result.differences){expect(difference.regionMatch).toBe(true);expect(difference.max).toBeLessThanOrEqual(2);}
+});
 test('大画布缓存预览保留蒙版、剪贴和组透明度，移动、像素及蒙版替换不会留下旧画面',async()=>{
  const result=await page.evaluate(async()=>{
   const e=await import('./editor.js'),{renderPreview}=await import('./render-preview.js'),{defaultEffect}=await import('./effect-model.mjs');

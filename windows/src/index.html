@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="advanced-ui.css">
   <link rel="stylesheet" href="workspace-tools.css">
   <link rel="stylesheet" href="workspace.css">
+  <link rel="stylesheet" href="panels.css">
 </head>
 <body>
   <section id="startup-screen" role="status" aria-label="正在启动"><div class="startup-logo">C</div><h1>Compositor</h1><p>中文版 · Windows 11</p><div class="startup-track"><span></span></div><small id="startup-message">正在准备编辑工作区…</small></section>
@@ -53,10 +54,10 @@
       <section class="panel properties" id="properties-panel" hidden><div class="panel-heading"><h2>属性</h2><span id="layer-type">像素图层</span></div>
         <div class="property-grid">
           <label>X <input id="layer-x" type="number" step="1" aria-label="图层 X 坐标"></label><label>Y <input id="layer-y" type="number" step="1" aria-label="图层 Y 坐标"></label>
-          <label>整体缩放 <input id="layer-scale" type="number" min="1" max="10000" aria-label="图层缩放"> %</label><label>高度 <input id="layer-scale-y" type="number" min="1" max="10000" aria-label="图层高度缩放"> %</label><label>旋转 <input id="layer-rotation" type="number" aria-label="图层旋转"> °</label>
+          <label>缩放 <input id="layer-scale" type="number" min="1" max="10000" aria-label="图层缩放"><span class="unit">%</span></label><label>高度 <input id="layer-scale-y" type="number" min="1" max="10000" aria-label="图层高度缩放"><span class="unit">%</span></label><label>旋转 <input id="layer-rotation" type="number" aria-label="图层旋转"><span class="unit">°</span></label>
         </div>
         <div id="text-properties" hidden><details open><summary>字符</summary><div class="font-search-row"><input id="font-search" type="search" placeholder="搜索本地字体"><button id="font-favorite" title="收藏 / 取消收藏当前字体" aria-label="置顶常用字体">★</button></div><small id="font-count">正在读取本地字体…</small>
-          <label class="stack">文字内容<textarea id="text-content" rows="3" placeholder="输入文字，支持多行" maxlength="10000"></textarea></label>
+          <button class="edit-text-button" data-command="editText">在画布上编辑文字…</button>
           <div class="text-style"><select id="font" aria-label="字体"><option value="Microsoft YaHei">微软雅黑</option><option value="SimSun">宋体</option><option value="SimHei">黑体</option><option value="Segoe UI">Segoe UI</option><option value="Arial">Arial</option></select><input id="font-size" type="number" min="1" max="1000" aria-label="字号"><button id="bold" title="粗体">B</button></div>
           <label class="stack">字体样式<select id="font-style" aria-label="字体样式"><option value="400:false">Regular</option></select></label><div class="character-buttons"><button id="italic" title="斜体">I</button><button id="underline" title="下划线">U</button></div><label class="text-color">文字颜色 <input id="text-color" type="color" aria-label="文字颜色"></label>
           <div class="text-layout"><label title="左右拖动调节，Shift 精细调节">行距（倍） <input id="text-leading" type="number" min="0.5" max="5" step="0.05" value="1.35"></label><label title="左右拖动调节">字距（px） <input id="text-spacing" type="number" min="-100" max="1000" value="0"></label></div>

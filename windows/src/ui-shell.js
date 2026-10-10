@@ -1,20 +1,22 @@
 const $ = id => document.getElementById(id);
 const menus = {
   '文件(F)': [['新建…', 'new', 'Ctrl+N'], ['打开项目或 PSD…', 'open', 'Ctrl+O'], ['导入图片…', 'import', 'Ctrl+I'], null, ['保存项目', 'save', 'Ctrl+S'], ['项目另存为…', 'saveAs', 'Ctrl+Shift+S'], ['导出 PNG / JPEG / PSD…', 'export', 'Ctrl+Shift+E'], null, ['关闭当前项目', 'closeDocument', 'Ctrl+W'], ['退出', 'close']],
-  '编辑(E)': [['撤销', 'undo', 'Ctrl+Z'], ['重做', 'redo', 'Ctrl+Shift+Z'], null, ['复制可见画面', 'copyMerged', 'Ctrl+Shift+C'], ['粘贴图片为图层', 'pasteImage', 'Ctrl+Shift+V'], ['前景色填充', 'fillSelection', 'Shift+F5'], ['清除像素', 'clearSelection']],
+  '编辑(E)': [['后退一步', 'undo', 'Ctrl+Z'], ['前进一步', 'redo', 'Ctrl+Y'], null, ['复制可见画面', 'copyMerged', 'Ctrl+Shift+C'], ['粘贴图片为图层', 'pasteImage', 'Ctrl+Shift+V'], ['前景色填充', 'fillSelection', 'Shift+F5'], ['清除像素', 'clearSelection']],
   '图像(I)': [['图像大小…', 'imageSize'], ['画布大小…', 'canvasSize'], ['裁剪到选区', 'cropSelection'], null, ['图像调整…', 'adjust']],
   '图层(L)': [['创建填充或调整图层…','createFill'], ['新建图层', 'addLayer', 'Ctrl+Shift+N'], ['复制图层', 'duplicate', 'Ctrl+J'], ['删除图层', 'deleteLayer'], ['向上移动', 'raise'], ['向下移动', 'lower'], null, ['创建图层组', 'group', 'Ctrl+G'], ['取消图层分组', 'ungroup', 'Ctrl+Shift+G'], ['创建 / 释放剪贴蒙版', 'clipping', 'Ctrl+Alt+G'], null, ['添加显示蒙版', 'addMask'], ['添加隐藏蒙版', 'hideMask'], ['启用 / 停用蒙版', 'toggleMask'], ['链接 / 取消链接蒙版', 'linkMask'], ['蒙版反相', 'invertMask'], ['应用蒙版', 'applyMask'], ['删除蒙版', 'deleteMask'], null, ['栅格化文字', 'rasterize'], ['向下合并', 'mergeDown', 'Ctrl+E'], ['合并可见图层', 'mergeVisible', 'Ctrl+Shift+M']],
   '文字(Y)': [['新建 / 编辑文字（T 工具）', 'textTool'], ['栅格化文字', 'rasterize']],
   '选择(S)': [['选择主体 / 移除背景…','selectSubject'],null,['全选', 'selectAll', 'Ctrl+A'], ['取消选区', 'deselect', 'Ctrl+D'], ['裁剪到选区', 'cropSelection']],
   '滤镜(T)': [['高斯模糊…','blur:gaussian'],['方框模糊…','blur:box'],['动感模糊…','blur:motion'],['径向模糊…','blur:radial'],['表面模糊…','blur:surface'],['平均','blur:average'],null,['图像调整…', 'adjust'],['AI 移除背景…','removeBackground']],
   '视图(V)': [['适合窗口', 'fit', 'Ctrl+0'], ['实际像素', 'actual', 'Ctrl+1'], null, ['启用 / 关闭对齐吸附', 'toggleSnap'],['显示 / 隐藏标尺','toggleRulers','Ctrl+R'],['显示 / 隐藏参考线','toggleGuides','Ctrl+;'],['锁定 / 解锁参考线','lockGuides'],['清除参考线','clearGuides'],['重置标尺原点','resetRulerOrigin']],
-  '窗口(W)': [['色板', 'panelSwatches'], ['属性', 'panelProperties'], ['蒙版', 'panelMask']],
+  '窗口(W)': [['色板', 'panelSwatches'], ['属性', 'panelProperties'], ['蒙版', 'panelMask'], ['画笔','panelBrush'], ['图层','panelLayers'], ['画布','panelCanvas'], null,['重置面板布局','resetPanels']],
   '帮助(H)': [['使用说明与快捷键', 'help']]
 };
 menus['图层(L)'].splice(5,0,['自由变换','freeTransform','Ctrl+T'],['图层样式…','layerStyles'],['清除图层样式','clearStyles'],null);
 export function showPanel(panel) {
-  for (const name of ['swatches', 'properties', 'mask']) $(name + '-panel').hidden = panel !== name;
+  const detached=$(panel+'-panel')?.closest('.floating-panel');
+  for (const name of ['swatches', 'properties', 'mask']) {const element=$(name+'-panel');if(panel===name)element.hidden=false;else if(!detached&&!element.closest('.floating-panel'))element.hidden=true;}
   document.querySelectorAll('[data-panel]').forEach(b => b.classList.toggle('active', b.dataset.panel === panel));
+  document.dispatchEvent(new CustomEvent('compositor:show-panel',{detail:panel}));
 }
 export function colorSwatches() { $('foreground-swatch').style.background = $('tool-color').style.background = $('color').value; $('background-swatch').style.background = $('gradient-color').value; }
 export function brushPreview(canvas, hardness) {

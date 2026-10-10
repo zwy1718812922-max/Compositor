@@ -110,12 +110,16 @@ export function advancedCommand(action, state) {
     checkpoint(); children.forEach(l => { l.parentId = layer.parentId || null; }); project.layers = project.layers.filter(l => l !== layer); canonicalize(project);
     project.activeId = children.at(-1)?.id || project.layers.at(-1).id; setTarget('image'); changed('已取消图层分组');
   } else if (action === 'duplicate') {
-    const subtree = [...(layer.type === 'group' ? descendants(project, layer.id) : []), layer];
-    capacity(subtree.reduce((n, l) => n + pixelCount(l), 0), 1, subtree.length); checkpoint();
-    const ids = new Map(subtree.map(l => [l.id, crypto.randomUUID()])), copies = subtree.map(l => cloneLayer(l, ids)); copies.at(-1).name = (layer.name + ' 副本').slice(0, 200);
-    project.layers.splice(project.layers.indexOf(layer) + 1, 0, ...copies); canonicalize(project); project.activeId = copies.at(-1).id; setTarget(target); changed('已复制图层及蒙版');
+    const roots=project.layers.filter(l=>selected.has(l.id)&&!ancestors(project,l).some(a=>selected.has(a.id)));if(!roots.length)roots.push(layer);
+    const trees=roots.map(l=>[...(l.type==='group'?descendants(project,l.id):[]),l]),subtree=trees.flat();
+    capacity(subtree.reduce((n,l)=>n+pixelCount(l),0),1,subtree.length);checkpoint();const ids=new Map(subtree.map(l=>[l.id,crypto.randomUUID()]));
+    const batches=new Map();for(const tree of trees){const root=tree.at(-1),copies=tree.map(l=>cloneLayer(l,ids)),parent=root.parentId||null;copies.at(-1).name=(root.name+' 副本').slice(0,200);let batch=batches.get(parent);if(!batch){batch={copies:[]};batches.set(parent,batch);}batch.copies.push(...copies);batch.top=root;}
+    for(const batch of batches.values())project.layers.splice(project.layers.indexOf(batch.top)+1,0,...batch.copies);
+    const chosen=roots.find(root=>root===layer||root.type==='group'&&descendants(project,root.id).includes(layer))||roots.at(-1);
+    canonicalize(project);project.activeId=ids.get(chosen.id);selected.clear();roots.forEach(l=>selected.add(ids.get(l.id)));setTarget(target);changed('已复制所选图层及蒙版');
   } else if (action === 'deleteLayer') {
-    const removed = [...(layer.type === 'group' ? descendants(project, layer.id) : []), layer];
+    const roots=project.layers.filter(l=>selected.has(l.id)&&!ancestors(project,l).some(a=>selected.has(a.id)));if(!roots.length)roots.push(layer);
+    const removed = roots.flatMap(l=>[...(l.type==='group'?descendants(project,l.id):[]),l]);
     if (removed.length === project.layers.length) throw new Error('至少保留一个图层。');
     if (removed.some(l => isLocked(project, l))) throw new Error('组内有锁定图层，请先解锁。');
     checkpoint(); project.layers = project.layers.filter(l => !removed.includes(l)); canonicalize(project); project.activeId = project.layers.at(-1).id; setTarget('image'); changed('已删除图层');
