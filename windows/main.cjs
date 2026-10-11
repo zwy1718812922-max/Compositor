@@ -65,13 +65,13 @@ app.whenReady().then(() => {
   handle('ai:run',p=>ai.run(p));handle('ai:cancel',()=>ai.cancel());win.on('closed',()=>ai.cancel());
   handle('fonts:list',()=>new Promise((resolve,reject)=>{require('node:child_process').execFile('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(__dirname.replace('app.asar','app.asar.unpacked'),'native','fonts.ps1')],{windowsHide:true,encoding:'utf8',maxBuffer:2*1024*1024},(error,out)=>error?reject(error):resolve(JSON.parse(out.replace(/^\uFEFF/,''))));}));
   handle('color:profile',async kind=>{let file=path.join(process.env.WINDIR,'System32','spool','drivers','color','RSWOP.icm');if(kind==='custom'){const r=await dialog.showOpenDialog(win,{title:'选择 CMYK ICC 配置文件',filters:[{name:'ICC 配置文件',extensions:['icc','icm']}],properties:['openFile']});if(r.canceled)return null;file=r.filePaths[0];}const b=await fs.readFile(file);if(b.length<128||b.length>4*1024*1024||b.toString('ascii',36,40)!=='acsp'||b.toString('ascii',16,20)!=='CMYK')throw new Error('请选择 CMYK ICC 配置文件。');return b.toString('base64');});
+  handle('recent:source',async payload=>{const file=payload.path;if(!path.isAbsolute(file)||!['.psd','.ccomp'].includes(path.extname(file).toLowerCase()))throw new Error('最近项目路径无效。');const stat=await fs.stat(file),stamp=stat.mtimeMs+':'+stat.size;if(payload.stamp===stamp)return{stamp};const source=path.extname(file).toLowerCase()==='.psd'?await processPsd('preview',await fs.readFile(file)):{project:await readProject(file)};return{...source,stamp};});
   handle('project:open', async requestedPath => {
     if(requestedPath&&(!path.isAbsolute(requestedPath)||!['.ccomp','.psd'].includes(path.extname(requestedPath).toLowerCase())))throw new Error('最近项目路径无效。');
     const result = requestedPath?{canceled:false,filePaths:[requestedPath]}:await dialog.showOpenDialog(win, { title: '打开项目或 PSD', filters: [{ name: '项目与 Photoshop 文件', extensions: ['ccomp', 'psd'] }, { name: 'Photoshop PSD', extensions: ['psd'] }, { name: 'Compositor 项目', extensions: ['ccomp'] }], properties: ['openFile'] });
     if (result.canceled) return null;
     const file = result.filePaths[0];
     if (path.extname(file).toLowerCase() === '.psd') {
-      if ((await fs.stat(file)).size > MAX_BYTES) throw new Error('PSD 文件超过 128 MB。');
       const imported = await processPsd('read',await fs.readFile(file)); pendingPath = null;
       return { ...imported, path: file, name: path.basename(file, path.extname(file)) };
     }
@@ -102,7 +102,6 @@ app.whenReady().then(() => {
     const images = [];
     for (const file of result.filePaths) {
       bytes += (await fs.stat(file)).size;
-      if (bytes > MAX_BYTES) throw new Error('导入图片总大小超过 128 MB。');
       const mime = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.bmp': 'image/bmp' }[path.extname(file).toLowerCase()];
       if (!mime) throw new Error('不支持此图片格式。');
       images.push({ name: path.basename(file), data: `data:${mime};base64,${(await fs.readFile(file)).toString('base64')}` });
@@ -110,7 +109,7 @@ app.whenReady().then(() => {
     return images;
   });
   handle('artboards:export',async(items,format,resolution=72)=>{
-    if(!['png','jpeg'].includes(format)||!Array.isArray(items)||!items.length||items.length>100)throw new Error('画板导出数据无效。');
+    if(!['png','jpeg'].includes(format)||!Array.isArray(items)||!items.length)throw new Error('画板导出数据无效。');
     const mime='image/'+format;let size=0;for(const item of items){if(typeof item.data!=='string'||!item.data.startsWith('data:'+mime+';base64,')||(size+=item.data.length)>MAX_BYTES*1.4)throw new Error('画板导出数据过大或格式无效。');}
     const chosen=await dialog.showOpenDialog(win,{title:'选择全部画板的导出文件夹',properties:['openDirectory','createDirectory']});if(chosen.canceled)return null;
     const directory=chosen.filePaths[0],extension=format==='jpeg'?'jpg':'png',output=[],{exportName}=require('./src/export-name.mjs');
@@ -130,7 +129,7 @@ app.whenReady().then(() => {
     const bytes = Buffer.from(data.split(',')[1], 'base64');
     if (bytes.length < 24 || !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error('复制的图片数据无效。');
     const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20);
-    if (!width || !height || width > 16384 || height > 16384 || width * height > 64 * 1024 * 1024) throw new Error('复制图片超过尺寸限制。');
+    if (!width || !height || width > 16384 || height > 16384 || width * height > 16384 * 16384) throw new Error('复制图片超过尺寸限制。');
     const image = nativeImage.createFromBuffer(bytes); if (image.isEmpty()) throw new Error('图片无法解码。');
     await clipboard.write([new ClipboardItem({ 'image/png': new Blob([image.toPNG()], { type: 'image/png' }) })]); return true;
   });
@@ -142,7 +141,7 @@ app.whenReady().then(() => {
     const blob = await item.getType(type); if (blob.size > MAX_BYTES) throw new Error('剪贴板图片超过 128 MB。');
     const image = nativeImage.createFromBuffer(Buffer.from(await blob.arrayBuffer())); if (image.isEmpty()) throw new Error('剪贴板图片无法解码。');
     const { width, height } = image.getSize();
-    if (width > 16384 || height > 16384 || width * height > 64 * 1024 * 1024) throw new Error('剪贴板图片超过尺寸限制。');
+    if (width > 16384 || height > 16384 || width * height > 16384 * 16384) throw new Error('剪贴板图片超过尺寸限制。');
     const data = image.toDataURL(); if (data.length > MAX_BYTES * 1.4) throw new Error('剪贴板图片超过 128 MB。');
     return data;
   });

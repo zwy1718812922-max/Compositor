@@ -1,3 +1,4 @@
+import {applyDefaults,rememberDefaults,setupPropertyDefaults} from './property-defaults.js';
 import {shapeKinds,shapeSettings,paintShape} from './shape-model.mjs';
 import {setupShapes} from './shapes.js';
 import {setupArtboards} from './artboards.js';
@@ -87,13 +88,11 @@ function snapshot() {
 }
 function checkpoint() { if(colorTransaction){if(!colorTransaction.pushed){history.push(colorTransaction.before);colorTransaction.pushed=true;}return;} if(numericTransaction){if(!numericTransaction.pushed){history.push(numericTransaction.before);numericTransaction.pushed=true;}return;} history.push(snapshot()); }
 function changed(message) {
+  if(!typeEditor?.editing&&!colorTransaction&&!numericTransaction)rememberDefaults(active());
   if (!selectedIds.has(project.activeId)) { selectedIds.clear(); selectedIds.add(project.activeId); }
   setDirty(true); render(); refresh(); if (message) $('status').textContent = message;
 }
-function capacity(width = 0, height = 0, count = 1) {
-  const pixels = project.layers.reduce((sum, l) => sum + pixelCount(l), 0);
-  if (project.layers.length + count > 100 || pixels + width * height > MAX_PIXELS) throw new Error('已达到图层内存限制（100 层 / 6400 万像素），请删除一些图层。');
-}
+function capacity() { /* Resource availability is checked by the allocating operation. */ }
 function newProject(width, height, background, title, resolution = 72, register=true,colorMode='RGB',profile,artboard=false) {
   if(register)workspace?.beginNew();
   documentOpen=true;document.body.classList.remove('no-document');
@@ -273,7 +272,7 @@ async function importImages(images) {
     const width = Math.max(1, Math.round(decoded.width * ratio)), height = Math.max(1, Math.round(decoded.height * ratio));
     pixels += width * height;
     capacity(pixels, 1, images.length);
-    const layer = rasterLayer(image.name.slice(0, 200), width, height);
+    const layer = applyDefaults(rasterLayer(image.name.slice(0, 200), width, height));
     layer.canvas.getContext('2d').drawImage(decoded, 0, 0, width, height);
     layer.x=area.x+Math.round((area.width-width)/2);layer.y=area.y+Math.round((area.height-height)/2);layer.parentId=current.type==='group'?current.id:current.parentId||board?.id||null;
     incoming.push(layer);
@@ -301,7 +300,6 @@ function replaceSize(next, message) {
 }
 function replacementCapacity(removed, width, height) {
   const pixels = project.layers.filter(l => !removed.includes(l)).reduce((n, l) => n + pixelCount(l), width * height);
-  if (pixels > MAX_PIXELS) throw new Error('操作后像素图层合计超过 6400 万像素，请先删除部分图层。');
 }
 function openSize(mode) { if(imageSize)return imageSize.open(mode);
   sizeMode = mode;
@@ -421,7 +419,7 @@ async function command(action,file=null) {
     else if (action === 'close') {const original=workspace.current();for(const doc of [...workspace.documents]){workspace.activate(doc.id,true);if(!await mayReplace()){if(original)workspace.activate(original,true);return;}dirty=false;workspace.capture();}api.setDirty(false);api.close();}
     else if (action === 'addLayer') {
       capacity(project.width, project.height); checkpoint();
-      const layer = rasterLayer('图层 ' + (project.layers.length + 1), project.width, project.height);
+      const layer = applyDefaults(rasterLayer('图层 ' + (project.layers.length + 1), project.width, project.height));
       layer.parentId=active().type==='group'?active().id:active().parentId||null;project.layers.push(layer);canonicalize(project);project.activeId=layer.id;setTarget('image');changed('已新建透明图层');
     }
   } catch (error) { toast(error.message || '操作失败，请重试。'); }
@@ -539,7 +537,7 @@ viewport.addEventListener('pointerdown', event => {
   if (tool === 'hand' || space || event.button === 1) {
     viewport.style.cursor='grabbing';brushCursor?.update();
     gesture = { kind: 'pan', startX: event.clientX, startY: event.clientY, pan: { ...pan } };
-  } else if(tool==='artboard'){const board=artboardUI.at(p);if(board){if(isLocked(project,board)||descendants(project,board.id).some(l=>isLocked(project,l))){toast('请先解锁画板及内容。');return;}selectLayer(board);gesture={kind:'artboardTransform',key:'move',layer:board,start:p,original:{x:board.x,y:board.y,...board.artboard},originals:[board,...descendants(project,board.id)].map(layer=>({layer,x:layer.x,y:layer.y,mask:layer.mask&&{x:layer.mask.x,y:layer.mask.y}})),before:snapshot(),dirty,redo:[...history.redoStack],committed:false};}else gesture={kind:'artboardCreate',start:p,end:p};
+  } else if(tool==='artboard'){const board=artboardUI.at(p);if(board){if(isLocked(project,board)||descendants(project,board.id).some(l=>isLocked(project,l))){toast('请先解锁画板及内容。');return;}selectLayer(board);gesture={kind:'artboardTransform',key:'move',copy:event.altKey,layer:board,start:p,original:{x:board.x,y:board.y,...board.artboard},originals:[board,...descendants(project,board.id)].map(layer=>({layer,x:layer.x,y:layer.y,mask:layer.mask&&{x:layer.mask.x,y:layer.mask.y}})),before:snapshot(),dirty,redo:[...history.redoStack],committed:false};}else gesture={kind:'artboardCreate',start:p,end:p};
   } else {
     if (p.x < 0 || p.y < 0 || p.x >= project.width || p.y >= project.height) {transformSelected=false;drawOverlay();return;}
     transformSelected=true;
@@ -597,7 +595,7 @@ viewport.addEventListener('pointermove', event => {
   const g = gesture, p = point(event);
   if (g.kind === 'pan') { pan = { x: g.pan.x + event.clientX - g.startX, y: g.pan.y + event.clientY - g.startY }; applyView(true); }
   else if(g.kind==='shapeRadius')shapes.move(g,p);
-  else if(g.kind==='artboardTransform')artboardUI.move(g,p);
+  else if(g.kind==='artboardTransform')artboardUI.move(g,p,event.shiftKey);
   else if(g.kind==='artboardCreate'){g.end=p;drawOverlay();artboardUI.preview(rectangle(g.start,g.end));}
   else if (g.kind === 'transform') { try { transformUI.move(g,p,event.shiftKey); } catch (error) { toast(error.message); } }
   else if(g.kind==='pixelSelect')selections.move(g,p);
@@ -687,7 +685,6 @@ viewport.addEventListener('drop', async event => {
   try {
     const files = [...event.dataTransfer.files];
     if (files.some(file => !/^image\/(png|jpeg|webp|bmp)$/.test(file.type))) throw new Error('拖入功能支持 PNG、JPEG、WebP 和 BMP 图片；项目请使用“打开项目”。');
-    if (files.reduce((sum, file) => sum + file.size, 0) > 128 * 1024 * 1024) throw new Error('图片总大小超过 128 MB。');
     const images = [];
     for (const file of files) {
       const data = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); });
@@ -722,11 +719,11 @@ $('export-format').onchange = () => { $('export-quality').closest('label').hidde
 new ResizeObserver(() => { if (project) drawRulers(project, zoom, pan); }).observe(viewport);
 brushCursor=setupBrushCursor({tool:()=>tool,zoom:()=>zoom,busy:()=>busy,open:()=>documentOpen,space:()=>space});
 fonts=setupFonts(api,refresh,toast);
-setupNumericScrubbing({busy:()=>busy||!!gesture,begin:input=>{if(!documentOpen||input.closest('dialog'))return null;numericTransaction={before:snapshot(),dirty,undo:[...history.undoStack],redo:[...history.redoStack],pushed:false};return numericTransaction;},end:async(cancel,transaction)=>{numericTransaction=null;if(cancel&&transaction?.pushed){project=await deserialize(transaction.before);history.undoStack=transaction.undo;history.redoStack=transaction.redo;setDirty(transaction.dirty);render();refresh();}}});
+setupNumericScrubbing({busy:()=>busy||!!gesture,begin:input=>{if(!documentOpen||input.closest('dialog'))return null;numericTransaction={before:snapshot(),dirty,undo:[...history.undoStack],redo:[...history.redoStack],pushed:false};return numericTransaction;},end:async(cancel,transaction)=>{numericTransaction=null;if(!cancel&&!typeEditor.editing)rememberDefaults(active());if(cancel&&transaction?.pushed){project=await deserialize(transaction.before);history.undoStack=transaction.undo;history.redoStack=transaction.redo;setDirty(transaction.dirty);render();refresh();}}});
 $('font-style').onchange=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;if(!typeEditor.owns(active()))checkpoint();clearTextCache(active());const [weight,italic]=$('font-style').value.split(':');Object.assign(active(),{fontWeight:Number(weight),bold:Number(weight)>=700,italic:italic==='true'});changed();};
 for(const [id,key] of [['italic','italic'],['underline','underline']])$(id).onclick=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;if(!typeEditor.owns(active()))checkpoint();clearTextCache(active());active()[key]=!active()[key];changed();};
 document.querySelectorAll('[data-align]').forEach(b=>b.onclick=()=>{if(!documentOpen||active().type!=='text'||isLocked(project,active()))return;if(!typeEditor.owns(active()))checkpoint();clearTextCache(active());active().align=b.dataset.align;changed();});
-const interactionState={active,project:()=>project,point,snapshot,history:()=>history,dirty:()=>dirty,setDirty,render,refresh,checkpoint,capacity,changed,select:selectLayer,busy:()=>busy||!!gesture,tool:()=>tool,view:()=>({pan,zoom}),open:()=>documentOpen&&!workspace?.isHome(),command,toast,begin:(event,g)=>{gesture=g;viewport.setPointerCapture(event.pointerId);viewport.focus();}};
+const interactionState={dragging:()=>gesture?.kind==='artboardTransform',active,project:()=>project,point,snapshot,history:()=>history,dirty:()=>dirty,setDirty,render,refresh,checkpoint,capacity,changed,select:selectLayer,busy:()=>busy||!!gesture,tool:()=>tool,view:()=>({pan,zoom}),open:()=>documentOpen&&!workspace?.isHome(),command,toast,begin:(event,g)=>{gesture=g;viewport.setPointerCapture(event.pointerId);viewport.focus();}};
 artboardUI=setupArtboards({...interactionState,resizeCanvas,shiftView:(x,y)=>{pan={x:pan.x+x*zoom,y:pan.y+y*zoom};$('canvas-wrap').style.transform='translate('+pan.x+'px,'+pan.y+'px) scale('+zoom+')';}});
 shapes=setupShapes({...interactionState,parentAt:p=>artboardUI.parentAt(p),show:()=>documentOpen&&transformSelected&&!typeEditor.editing&&!document.querySelector('dialog[open]')});
 propertiesUI=setupProperties({...interactionState,center:transformPoint,target:editSurface,typeEditor:()=>typeEditor,artboards:()=>artboardUI});
@@ -734,18 +731,19 @@ imageSize=setupImageSize({project:()=>project,busy:()=>busy,setBusy,replace:repl
 toolGroups=setupToolGroups({canUse:()=>documentOpen&&!workspace?.isHome()&&!busy&&!gesture&&!document.querySelector('dialog[open]'),setTool,tool:()=>tool});
 setupColorPicker({project:()=>project,api,
   begin:input=>{if(!documentOpen||input.closest('dialog')||typeEditor.editing)return null;colorTransaction={before:snapshot(),dirty,undo:[...history.undoStack],redo:[...history.redoStack],pushed:false};return colorTransaction;},
-  end:async(cancel,transaction)=>{colorTransaction=null;if(cancel&&transaction?.pushed){setBusy(true);try{project=await deserialize(transaction.before);history.undoStack=transaction.undo;history.redoStack=transaction.redo;setDirty(transaction.dirty);render();refresh();}finally{setBusy(false);}}},
+  end:async(cancel,transaction)=>{colorTransaction=null;if(!cancel&&!typeEditor.editing)rememberDefaults(active());if(cancel&&transaction?.pushed){setBusy(true);try{project=await deserialize(transaction.before);history.undoStack=transaction.undo;history.redoStack=transaction.redo;setDirty(transaction.dirty);render();refresh();}finally{setBusy(false);}}},
   addSwatch:color=>{const button=document.createElement('button');button.className='swatch';button.title='自定义 '+color;button.setAttribute('aria-label',button.title);button.style.background=color;button.onclick=()=>{$('color').value=color;$('color').dispatchEvent(new Event('input',{bubbles:true}));};$('swatch-grid').append(button);},
   sample:callback=>{const old=viewport.style.cursor;viewport.style.cursor='crosshair';const clean=()=>{viewport.removeEventListener('pointerdown',pick,true);document.removeEventListener('keydown',escape,true);viewport.style.cursor=old;};const pick=event=>{event.preventDefault();event.stopImmediatePropagation();const p=point(event),x=Math.floor((p.x-Number(display.dataset.originX||0))*display.width/Number(display.dataset.worldWidth||project.width)),y=Math.floor((p.y-Number(display.dataset.originY||0))*display.height/Number(display.dataset.worldHeight||project.height));let color=null;if(x>=0&&y>=0&&x<display.width&&y<display.height){const pixel=display.getContext('2d').getImageData(x,y,1,1).data;color='#'+[...pixel.slice(0,3)].map(n=>n.toString(16).padStart(2,'0')).join('');}clean();callback(color);};const escape=event=>{if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();clean();callback(null);}};viewport.addEventListener('pointerdown',pick,true);document.addEventListener('keydown',escape,true);}
 });
 
-workspace=setupWorkspace({capture:()=>({project,name,dirty,path,sourcePath,history,zoom,pan:{...pan},selection,cropRect,editTarget,selected:[...selectedIds],transformSelected}),
+workspace=setupWorkspace({api,capture:()=>({project,name,dirty,path,sourcePath,history,zoom,pan:{...pan},selection,cropRect,editTarget,selected:[...selectedIds],transformSelected}),
   canSwitch:()=>!busy&&!gesture&&!document.querySelector('dialog[open]')&&!typeEditor.editing,
   restore:doc=>{setTarget('image');({project,name,dirty,path,sourcePath,history,zoom,pan,selection,cropRect,transformSelected}=doc);documentOpen=true;document.body.classList.remove('no-document');selectedIds.clear();doc.selected.forEach(id=>selectedIds.add(id));setTarget(doc.editTarget);api.commitDocument({kind:'activate',path});resizeCanvas();applyView();render();refresh();updateTitle();api.setDirty(workspace.hasDirty());},
   empty:()=>{documentOpen=false;selection=cropRect=null;history=new History();selectedIds.clear();dirty=false;api.commitDocument({kind:'activate',path:null});document.body.classList.add('no-document');$('layer-list').replaceChildren();$('layer-count').textContent='0 个图层';$('dimensions').textContent='';snapping.clear();brushCursor.update();},
   close:id=>{if(workspace.activate(id))command('closeDocument');},open:file=>command('open',file),
   thumbnail:p=>viewMotion.thumbnail(p),release:p=>viewMotion.release(p)
 });
+setupPropertyDefaults();
 newProject(1280, 800, 'transparent', '未命名',72,false);documentOpen=false;document.body.classList.add('no-document');workspace.showHome();
 setTool('move');
 setBusy(false);

@@ -1,3 +1,4 @@
+import {applyDefaults,applyMaskDefaults} from './property-defaults.js';
 import { baseLayer, canvas, decodeImage, invalidatePixels } from './editor.js';
 import { canonicalize, isLocked } from './layer-tree.js';
 import { fillNames, adjustments, defaults } from './fill-model.mjs';
@@ -22,7 +23,8 @@ export function setupFillEditor(state) {
   if(!layer){state.capacity();layer={...baseLayer((fillNames[kind]||adjustments[kind][0])+' 1',isFill?'fill':'adjustment'),parentId:state.active().type==='group'?state.active().id:state.active().parentId||null};
    if(isFill)Object.assign(layer,{width:project.width,height:project.height,fill:{kind,color:lastColor(),color2:'#ffffff',angle:0,scale:100,pattern:'checker'}});
    else layer.adjustment={kind,values:{...defaults(kind),color:kind==='gradientMap'?'#000000':'#ec8d32',color2:'#ffffff',range:'neutrals'}};
-   const selection=state.selection();if(selection){state.capacity(project.width,project.height);const bitmap=canvas(project.width,project.height),ctx=bitmap.getContext('2d');ctx.fillStyle='black';ctx.fillRect(0,0,bitmap.width,bitmap.height);ctx.fillStyle='white';if(selection.canvas)ctx.drawImage(selection.canvas,selection.x,selection.y);else ctx.fillRect(selection.x,selection.y,selection.width,selection.height);layer.mask={canvas:bitmap,x:0,y:0,scale:1,rotation:0,enabled:true,linked:true,defaultColor:0,density:1,feather:0};}
+   applyDefaults(layer);if(isFill)layer.fill.color=lastColor();
+   const selection=state.selection();if(selection){state.capacity(project.width,project.height);const bitmap=canvas(project.width,project.height),ctx=bitmap.getContext('2d');ctx.fillStyle='black';ctx.fillRect(0,0,bitmap.width,bitmap.height);ctx.fillStyle='white';if(selection.canvas)ctx.drawImage(selection.canvas,selection.x,selection.y);else ctx.fillRect(selection.x,selection.y,selection.width,selection.height);layer.mask={canvas:bitmap,x:0,y:0,scale:1,rotation:0,enabled:true,linked:true,defaultColor:0,density:1,feather:0};applyMaskDefaults(layer.mask);}
    const index=project.layers.indexOf(state.active());project.layers.splice(index+1,0,layer);canonicalize(project);
   }
   session={layer,existing,before,activeId,original:existing?structuredClone(isFill?layer.fill:layer.adjustment):null,pattern:layer._pattern,committed:false};project.activeId=layer.id;

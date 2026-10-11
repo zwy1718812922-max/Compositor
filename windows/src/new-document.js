@@ -86,7 +86,7 @@ export function setupNewDocument(onCreate) {
     const width = Number($('new-width').value), height = Number($('new-height').value), ppi = resolution();
     const pixelWidth = Math.round(toPixels(width, unit, ppi)), pixelHeight = Math.round(toPixels(height, unit, ppi));
     if (![width, height, ppi].every(n => Number.isFinite(n) && n > 0) || ppi < 1 || ppi > 9600) throw new Error('请输入有效的宽度、高度和分辨率（1–9600 ppi）。');
-    if (pixelWidth < 1 || pixelHeight < 1 || pixelWidth > 16384 || pixelHeight > 16384 || pixelWidth * pixelHeight > 64 * 1024 * 1024) throw new Error('画布每边需为 1–16384 像素，总像素不可超过 6400 万。请减小尺寸或分辨率。');
+    if (pixelWidth < 1 || pixelHeight < 1 || pixelWidth > 16384 || pixelHeight > 16384) throw new Error('画布每边需为 1–16384 像素。请减小尺寸或分辨率。');
     return {
       width: pixelWidth, height: pixelHeight, resolution: ppi,artboard:$('new-artboard').checked,colorMode:$('new-color-mode').value,
       background: $('new-background').value === 'custom' ? $('new-background-color').value : $('new-background').value,

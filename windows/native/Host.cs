@@ -35,13 +35,12 @@ internal sealed class EditorWindow : Form {
     readonly Dictionary<string,string> imports = new Dictionary<string,string>();
     readonly Dictionary<string,Stream> importStreams = new Dictionary<string,Stream>();
     const string Origin="https://compositor.local/",PageUrl=Origin+"src/index.html";
-    const int MaxBytes=128*1024*1024;
     readonly WebView2 web=new WebView2();readonly StartupPanel splash=new StartupPanel();
     readonly bool testing=Environment.GetEnvironmentVariable("COMPOSITOR_TEST")=="1";
     bool dirty;string currentPath,pendingPath,exportPath,mockOpen,mockSave;
     [DllImport("user32.dll")] static extern bool ReleaseCapture();
     [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd,int message,IntPtr wParam,IntPtr lParam);
-    static JavaScriptSerializer Json() { return new JavaScriptSerializer { MaxJsonLength=256*1024*1024,RecursionLimit=128 }; }
+    static JavaScriptSerializer Json() { return new JavaScriptSerializer { MaxJsonLength=int.MaxValue,RecursionLimit=128 }; }
     static Dictionary<string,object> Object(object value) { return value as Dictionary<string,object> ?? new Dictionary<string,object>(); }
     static object Get(Dictionary<string,object> value,string key) { object result;return value.TryGetValue(key,out result)?result:null; }
     static string StringValue(object value) { return value as string ?? ""; }
@@ -49,7 +48,7 @@ internal sealed class EditorWindow : Form {
     static bool Flag(object value) { return value is bool && (bool)value; }
     static double Number(object value) { return Convert.ToDouble(value); }
     public EditorWindow() {
-        Text="Compositor 中文版 0.9.0"; ClientSize=new Size(1440,960);MinimumSize=new Size(1024,720);StartPosition=FormStartPosition.CenterScreen;
+        Text="Compositor 中文版 0.10.0"; ClientSize=new Size(1440,960);MinimumSize=new Size(1024,720);StartPosition=FormStartPosition.CenterScreen;
         FormBorderStyle=FormBorderStyle.None;BackColor=Color.FromArgb(38,38,38);Padding=new Padding(1);AutoScaleMode=AutoScaleMode.Dpi;
         MaximizedBounds=Screen.FromControl(this).WorkingArea;var icon=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"assets","icon.ico");if(File.Exists(icon))Icon=new Icon(icon);
         web.Dock=DockStyle.Fill;web.DefaultBackgroundColor=BackColor;Controls.Add(web);Controls.Add(splash);splash.BringToFront();
@@ -94,9 +93,9 @@ internal sealed class EditorWindow : Form {
     void Command(string action) { web.CoreWebView2.PostWebMessageAsJson(Json().Serialize(new {command=action})); }
     string OpenPath(string filter,bool images=false) { if(testing&&!String.IsNullOrEmpty(mockOpen))return mockOpen;using(var d=new OpenFileDialog { Title=images?"导入图片为图层":"打开项目或 PSD",Filter=filter,CheckFileExists=true,Multiselect=images })return d.ShowDialog(this)==DialogResult.OK?d.FileName:null; }
     string SavePath(string filter,string name) { if(testing&&!String.IsNullOrEmpty(mockSave))return mockSave;using(var d=new SaveFileDialog { Title="选择保存位置",Filter=filter,FileName=name,AddExtension=true,OverwritePrompt=true })return d.ShowDialog(this)==DialogResult.OK?d.FileName:null; }
-    static byte[] ReadBytes(string file) { if(new FileInfo(file).Length>MaxBytes)throw new Exception("文件超过 128 MB。");return File.ReadAllBytes(file); }
+    static byte[] ReadBytes(string file) { return File.ReadAllBytes(file); }
     static void AtomicWrite(string file,byte[] data) {
-        if(data.Length>MaxBytes)throw new Exception("文件超过 128 MB。");file=Path.GetFullPath(file);var temp=Path.Combine(Path.GetDirectoryName(file),"."+Path.GetFileName(file)+"."+Guid.NewGuid()+".tmp");
+        file=Path.GetFullPath(file);var temp=Path.Combine(Path.GetDirectoryName(file),"."+Path.GetFileName(file)+"."+Guid.NewGuid()+".tmp");
         try { File.WriteAllBytes(temp,data);if(File.Exists(file))File.Replace(temp,file,null);else File.Move(temp,file); }finally {if(File.Exists(temp))File.Delete(temp);}
     }
     AiService ai;
@@ -113,25 +112,31 @@ internal sealed class EditorWindow : Form {
             case "document:close":if(!dirty)Close();return true;
             case "window:drag":ReleaseCapture();SendMessage(Handle,0xA1,(IntPtr)2,IntPtr.Zero);return true;
             case "window:action":switch(StringValue(payload)){case "minimize":WindowState=FormWindowState.Minimized;break;case "maximize":WindowState=WindowState==FormWindowState.Maximized?FormWindowState.Normal:FormWindowState.Maximized;break;case "close":Close();break;default:throw new Exception("未知窗口操作。");}return true;
+            case "recent:source": {
+                var file=Field(p,"path");if(!Path.IsPathRooted(file)||(!String.Equals(Path.GetExtension(file),".psd",StringComparison.OrdinalIgnoreCase)&&!String.Equals(Path.GetExtension(file),".ccomp",StringComparison.OrdinalIgnoreCase)))throw new Exception("最近项目路径无效。");
+                var info=new FileInfo(file);var stamp=info.LastWriteTimeUtc.Ticks.ToString()+":"+info.Length.ToString();if(Field(p,"stamp")==stamp)return new {stamp};
+                if(String.Equals(Path.GetExtension(file),".psd",StringComparison.OrdinalIgnoreCase)){var token=Guid.NewGuid().ToString("N");imports[token]=file;return new {stamp,source="psd",url="https://compositor-import.local/_import/"+token};}
+                var bytes=await Task.Run(()=>ReadBytes(file));return new {stamp,project=Json().DeserializeObject(Encoding.UTF8.GetString(bytes))};
+            }
             case "project:open": {
                 var file=StringValue(payload);if(!String.IsNullOrEmpty(file)){if(!Path.IsPathRooted(file)||(!String.Equals(Path.GetExtension(file),".ccomp",StringComparison.OrdinalIgnoreCase)&&!String.Equals(Path.GetExtension(file),".psd",StringComparison.OrdinalIgnoreCase)))throw new Exception("最近项目路径无效。");}else file=OpenPath("项目和 Photoshop 文件|*.ccomp;*.psd|Compositor 项目|*.ccomp|Photoshop PSD|*.psd");if(file==null)return null;
-                var name=Path.GetFileNameWithoutExtension(file);if(Path.GetExtension(file).ToLowerInvariant()==".psd"){if(new FileInfo(file).Length>MaxBytes)throw new Exception("文件超过 128 MB。");pendingPath=null;var token=Guid.NewGuid().ToString("N");imports.Clear();imports[token]=file;return new {source="psd",path=file,name,url="https://compositor-import.local/_import/"+token};}
+                var name=Path.GetFileNameWithoutExtension(file);if(Path.GetExtension(file).ToLowerInvariant()==".psd"){pendingPath=null;var token=Guid.NewGuid().ToString("N");imports.Clear();imports[token]=file;return new {source="psd",path=file,name,url="https://compositor-import.local/_import/"+token};}
                 var bytes=await Task.Run(()=>ReadBytes(file));
                 var project=Json().DeserializeObject(Encoding.UTF8.GetString(bytes));pendingPath=file;return new {project,path=file,name};
             }
             case "project:save": {
-                var project=Object(Get(p,"project"));if(Field(project,"format")!="com.compositor.windows"||Number(Get(project,"version"))<1||Number(Get(project,"version"))>7)throw new Exception("项目格式无效。");
+                var project=Object(Get(p,"project"));if(Field(project,"format")!="com.compositor.windows"||Number(Get(project,"version"))<1||Number(Get(project,"version"))>8)throw new Exception("项目格式无效。");
                 var file=currentPath;if(file==null||Flag(Get(p,"saveAs")))file=SavePath("Compositor 项目|*.ccomp",file??"未命名.ccomp");if(file==null)return null;
                 var bytes=Encoding.UTF8.GetBytes(Json().Serialize(project));await Task.Run(()=>AtomicWrite(file,bytes));currentPath=file;return new {path=file,name=Path.GetFileNameWithoutExtension(file)};
             }
             case "image:import": {
                 string[] files;if(testing&&!String.IsNullOrEmpty(mockOpen))files=new[]{mockOpen};else using(var d=new OpenFileDialog {Title="导入图片为图层",Filter="图片|*.png;*.jpg;*.jpeg;*.webp;*.bmp",Multiselect=true}){if(d.ShowDialog(this)!=DialogResult.OK)return new object[0];files=d.FileNames;}
-                var output=new List<object>();long total=0;foreach(var file in files){total+=new FileInfo(file).Length;if(total>MaxBytes)throw new Exception("导入图片总大小超过 128 MB。");var ext=Path.GetExtension(file).ToLowerInvariant();var mime=ext==".png"?"image/png":ext==".jpg"||ext==".jpeg"?"image/jpeg":ext==".webp"?"image/webp":ext==".bmp"?"image/bmp":null;if(mime==null)throw new Exception("不支持此图片格式。");var bytes=await Task.Run(()=>ReadBytes(file));output.Add(new {name=Path.GetFileName(file),data="data:"+mime+";base64,"+Convert.ToBase64String(bytes)});}return output;
+                var output=new List<object>();long total=0;foreach(var file in files){total+=new FileInfo(file).Length;var ext=Path.GetExtension(file).ToLowerInvariant();var mime=ext==".png"?"image/png":ext==".jpg"||ext==".jpeg"?"image/jpeg":ext==".webp"?"image/webp":ext==".bmp"?"image/bmp":null;if(mime==null)throw new Exception("不支持此图片格式。");var bytes=await Task.Run(()=>ReadBytes(file));output.Add(new {name=Path.GetFileName(file),data="data:"+mime+";base64,"+Convert.ToBase64String(bytes)});}return output;
             }
             case "artboards:export": {
-                var format=Field(p,"format");if(format!="png"&&format!="jpeg")throw new Exception("图片格式无效。");var items=Get(p,"items") as object[];if(items==null||items.Length<1||items.Length>100)throw new Exception("画板导出数据无效。");
+                var format=Field(p,"format");if(format!="png"&&format!="jpeg")throw new Exception("图片格式无效。");var items=Get(p,"items") as object[];if(items==null||items.Length<1)throw new Exception("画板导出数据无效。");
                 string directory=null;if(testing&&!String.IsNullOrEmpty(mockSave))directory=Path.GetDirectoryName(mockSave);else using(var d=new FolderBrowserDialog {Description="选择全部画板的导出文件夹",ShowNewFolderButton=true})if(d.ShowDialog(this)==DialogResult.OK)directory=d.SelectedPath;if(directory==null)return null;
-                var files=new List<string>();var extension=format=="png"?"png":"jpg";long total=0;foreach(var item in items){var record=Object(item);var name=Field(record,"name");foreach(var c in Path.GetInvalidFileNameChars())name=name.Replace(c,'_');name=name.TrimEnd(' ','.');if(String.IsNullOrEmpty(name))name="画板";var bytes=Convert.FromBase64String(Field(record,"data"));total+=bytes.Length;if(total>MaxBytes)throw new Exception("全部画板导出数据超过 128 MB。");var index=1;var file=Path.Combine(directory,name+"."+extension);while(File.Exists(file)){index++;file=Path.Combine(directory,name+" ("+index+")."+extension);}await Task.Run(()=>AtomicWrite(file,bytes));files.Add(file);}return files;
+                var files=new List<string>();var extension=format=="png"?"png":"jpg";long total=0;foreach(var item in items){var record=Object(item);var name=Field(record,"name");foreach(var c in Path.GetInvalidFileNameChars())name=name.Replace(c,'_');name=name.TrimEnd(' ','.');if(String.IsNullOrEmpty(name))name="画板";var bytes=Convert.FromBase64String(Field(record,"data"));total+=bytes.Length;var index=1;var file=Path.Combine(directory,name+"."+extension);while(File.Exists(file)){index++;file=Path.Combine(directory,name+" ("+index+")."+extension);}await Task.Run(()=>AtomicWrite(file,bytes));files.Add(file);}return files;
             }
             case "image:export": {
                 var format=Field(p,"format");if(format!="png"&&format!="jpeg")throw new Exception("图片格式无效。");var file=SavePath(format=="png"?"PNG 图片|*.png":"JPEG 图片|*.jpg",format=="png"?"作品.png":"作品.jpg");if(file==null)return null;var bytes=Convert.FromBase64String(Field(p,"data"));await Task.Run(()=>AtomicWrite(file,bytes));return file;
@@ -140,11 +145,11 @@ internal sealed class EditorWindow : Form {
             case "psd:select":exportPath=SavePath("Photoshop PSD|*.psd","作品.psd");return exportPath;
             case "psd:write": { if(exportPath==null||Field(p,"path")!=exportPath)throw new Exception("PSD 保存位置无效。");var file=exportPath;var bytes=Convert.FromBase64String(Field(p,"data"));await Task.Run(()=>AtomicWrite(file,bytes));exportPath=null;return file; }
             case "image:copy": {
-                var data=StringValue(payload);if(!data.StartsWith("data:image/png;base64,"))throw new Exception("剪贴板图片格式无效。");var bytes=Convert.FromBase64String(data.Substring(22));if(bytes.Length>MaxBytes)throw new Exception("图片超过 128 MB。");
+                var data=StringValue(payload);if(!data.StartsWith("data:image/png;base64,"))throw new Exception("剪贴板图片格式无效。");var bytes=Convert.FromBase64String(data.Substring(22));
                 using(var stream=new MemoryStream(bytes))using(var image=Image.FromStream(stream)){if(image.Width>16384||image.Height>16384||(long)image.Width*image.Height>64*1024*1024)throw new Exception("图片尺寸超出限制。");var obj=new DataObject();obj.SetData("PNG",false,new MemoryStream(bytes));obj.SetData(DataFormats.Bitmap,true,new Bitmap(image));Clipboard.SetDataObject(obj,true);}return true;
             }
             case "image:paste": {
-                if(Clipboard.ContainsData("PNG")){var stream=Clipboard.GetData("PNG") as MemoryStream;if(stream!=null){var bytes=stream.ToArray();if(bytes.Length>MaxBytes)throw new Exception("剪贴板图片超过 128 MB。");return "data:image/png;base64,"+Convert.ToBase64String(bytes);}}
+                if(Clipboard.ContainsData("PNG")){var stream=Clipboard.GetData("PNG") as MemoryStream;if(stream!=null){var bytes=stream.ToArray();return "data:image/png;base64,"+Convert.ToBase64String(bytes);}}
                 if(!Clipboard.ContainsImage())return null;using(var image=Clipboard.GetImage())using(var stream=new MemoryStream()){if(image.Width>16384||image.Height>16384||(long)image.Width*image.Height>64*1024*1024)throw new Exception("剪贴板图片尺寸超出限制。");image.Save(stream,ImageFormat.Png);return "data:image/png;base64,"+Convert.ToBase64String(stream.ToArray());}
             }
             case "test:configure": {

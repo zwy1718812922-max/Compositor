@@ -9,15 +9,15 @@ export function setupProperties(state) {
   const transform=section('变换');transform.append(grid);grid.classList.add('ps-transform-grid');
   const field=(id,label,min=0,max=16384,step=1)=>'<label>'+label+' <input id="'+id+'" type="number" min="'+min+'" max="'+max+'" step="'+step+'" aria-label="'+label+'"> <small>px</small></label>';
   grid.insertAdjacentHTML('afterbegin',field('property-width','W',1)+field('property-height','H',1));grid.prepend(...['property-width','layer-x','property-height','layer-y'].map(id=>$(id).closest('label')));
-  const actions=document.createElement('div');actions.className='property-actions';actions.innerHTML='<button id="property-link" title="链接宽高比例" aria-label="链接宽高比例" aria-pressed="true">⛓</button><button id="property-flip-x" title="水平翻转">↔</button><button id="property-flip-y" title="垂直翻转">↕</button><button id="property-reset" title="重置变换">↶</button>';transform.append(actions);let linked=true;
-  $('property-link').onclick=()=>{linked=!linked;$('property-link').setAttribute('aria-pressed',String(linked));};
+  const actions=document.createElement('div');actions.className='property-actions';actions.innerHTML='<button id="property-link" title="链接宽高比例" aria-label="链接宽高比例" aria-pressed="true">⛓</button><button id="property-flip-x" title="水平翻转">↔</button><button id="property-flip-y" title="垂直翻转">↕</button><button id="property-reset" title="重置变换">↶</button>';transform.append(actions);let linked=true;try{linked=localStorage.getItem('compositor.propertyLink')!=='false';}catch{}$('property-link').setAttribute('aria-pressed',String(linked));
+  $('property-link').onclick=()=>{linked=!linked;try{localStorage.setItem('compositor.propertyLink',String(linked));}catch{}$('property-link').setAttribute('aria-pressed',String(linked));};
   function edit(mutator,geometry=false){const selected=state.active(),l=geometry?state.target():selected;if(!l||state.busy()||isLocked(state.project(),selected))return;try{if(!state.typeEditor()?.owns(l))state.checkpoint();if(l.type==='text')clearTextCache(l);mutator(l);state.changed();}catch(error){state.toast(error.message);state.refresh();}}
   for(const [id,axis] of [['property-width','width'],['property-height','height']])$(id).onchange=()=>{
     const l=state.target(),value=Number($(id).value);if(!Number.isFinite(value)||value<1||value>16384)return;
     if(l.artboard){state.artboards().resize(l,{[axis]:Math.round(value)},linked);return;}
     if(l.type==='group'||l.type==='adjustment')return;
     edit(layer=>{const b=bounds(layer),sx=layer.scale,sy=layer.scaleY??sx,ratio=value/(b[axis]*(axis==='width'?sx:sy));
-      if(layer.type==='shape'){const s=layer.shape;s[axis]=value/(axis==='width'?sx:sy);if(linked)s[axis==='width'?'height':'width']*=ratio;s.radii=s.radii.map(r=>Math.min(r,Math.min(s.width,s.height)/2));}
+      if(layer.type==='shape'){const s=layer.shape;s[axis]=value/(axis==='width'?sx:sy);if(linked)s[axis==='width'?'height':'width']*=ratio;s.radii=s.radii.map(r=>Math.min(r,Math.min(s.width,s.height)/2));if(s.vertexRadii)s.vertexRadii=s.vertexRadii.map(r=>Math.min(r,Math.min(s.width,s.height)/2));}
       else if(layer.type==='text'&&layer.textMode==='paragraph'){layer[axis==='width'?'boxWidth':'boxHeight']=value/(axis==='width'?sx:sy);if(linked)layer[axis==='width'?'boxHeight':'boxWidth']*=ratio;}
       else transformLayer(layer,axis==='width'?{scale:sx*ratio,scaleY:linked?sy*ratio:sy}:{scale:linked?sx*ratio:sx,scaleY:sy*ratio});
     },true);

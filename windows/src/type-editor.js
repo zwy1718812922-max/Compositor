@@ -1,3 +1,4 @@
+import {applyDefaults,rememberDefaults} from './property-defaults.js';
 import { affine, multiply,vector,decompose } from './affine.mjs';
 import { textLayer, bounds, textFont,canvas,localPoint,transformPoint } from './editor.js';
 import { canonicalize, isVisible } from './layer-tree.js';
@@ -18,8 +19,8 @@ export function setupTypeEditor(state) {
     if (!session) {frame.hidden=true;return;}
     const layer = session.layer, size = bounds(layer);
     if (input.value !== layer.text) input.value = layer.text;
-    input.style.left = layer.x + 'px'; input.style.top = layer.y + 'px'; input.style.width = Math.max(24,size.width) + 'px'; input.style.height = Math.max(layer.fontSize * (layer.lineHeight || 1.35),size.height) + 'px'; input.style.font = textFont(layer); input.style.lineHeight = layer.lineHeight || 1.35; input.style.textAlign = layer.align || 'left'; input.style.letterSpacing = (layer.letterSpacing || 0)+'px'; input.style.caretColor = layer.color;
-    input.style.color=layer.color;input.style.opacity=layer.opacity;input.style.textDecoration=[layer.underline?'underline':'',layer.strike?'line-through':''].filter(Boolean).join(' ')||'none';input.style.direction=layer.paragraph?.direction||'ltr';input.style.paddingLeft=(layer.paragraph?.leftIndent||0)+'px';input.style.paddingRight=(layer.paragraph?.rightIndent||0)+'px';input.style.textIndent=(layer.paragraph?.firstIndent||0)+'px';input.style.transform = `matrix(${affine(layer).join(',')},0,0)`; input.wrap = layer.textMode === 'paragraph' ? 'soft' : 'off'; input.style.whiteSpace = layer.textMode === 'paragraph' ? 'pre-wrap' : 'pre'; input.style.wordBreak = layer.textMode === 'paragraph' ? 'break-all' : 'normal';
+    input.style.left = layer.x + 'px'; input.style.top = layer.y + 'px'; input.style.width = Math.max(24,size.width) + 'px'; input.style.height = Math.max(layer.fontSize * (layer.lineHeight || 1.35),size.height) + 'px'; input.style.font = textFont(layer); input.style.lineHeight = layer.lineHeight || 1.35; input.style.textAlign = (layer.align||'left').startsWith('justify-')?'justify':layer.align||'left';input.style.textAlignLast=(layer.align||'left').startsWith('justify-')?(layer.align==='justify-all'?'justify':layer.align.slice(8)):'auto';input.style.textJustify='auto'; input.style.letterSpacing = (layer.letterSpacing || 0)+'px'; input.style.caretColor = layer.color;
+    input.style.color=layer.color;input.style.opacity=layer.opacity;input.style.textDecoration=[layer.underline?'underline':'',layer.strike?'line-through':''].filter(Boolean).join(' ')||'none';input.style.direction=layer.paragraph?.direction||'ltr';input.style.paddingLeft=(layer.paragraph?.leftIndent||0)+'px';input.style.paddingRight=(layer.paragraph?.rightIndent||0)+'px';input.style.textIndent=(layer.paragraph?.firstIndent||0)+'px';input.style.transform = `matrix(${affine(layer).join(',')},0,0)`; input.wrap = layer.textMode === 'paragraph' ? 'soft' : 'off'; input.style.whiteSpace = layer.textMode === 'paragraph' ? 'pre-wrap' : 'pre'; input.style.wordBreak = 'normal';input.style.overflowWrap='anywhere';
     frame.hidden=layer.textMode!=='paragraph';frame.style.left=input.style.left;frame.style.top=input.style.top;frame.style.width=input.style.width;frame.style.height=input.style.height;frame.style.transform=input.style.transform;input.classList.toggle('paragraph-editing',!frame.hidden);
   }
   function finish(commit = true) {
@@ -32,7 +33,7 @@ export function setupTypeEditor(state) {
       state.select(state.active()); state.setDirty(s.dirty); state.render(); state.refresh(); state.status('已取消文字编辑');
     } else if (changed || s.created) {
       if (s.created || s.layer.name === '文字' || s.layer.name === '输入文字') s.layer.name = s.layer.text.split('\n')[0].slice(0,40) || '文字';
-      state.history.push(s.before); state.changed('文字编辑完成，可再次用 T 工具单击修改');
+      rememberDefaults(s.layer);state.history.push(s.before); state.changed('文字编辑完成，可再次用 T 工具单击修改');
     } else { for(const key of Object.keys(s.layer))if(!Object.hasOwn(s.original,key))delete s.layer[key];Object.assign(s.layer,s.original); state.setDirty(s.dirty); state.render(); state.refresh(); }
     update(); state.focus();
   }
@@ -46,6 +47,7 @@ export function setupTypeEditor(state) {
   function create(rect, paragraph) {
     state.capacity(); const before = state.snapshot(), dirty = state.dirty(), current = state.active(), p = state.project();
     const l = textLayer('输入文字',Math.round(rect.x),Math.round(rect.y),lastTextColor()); l.font = $('type-font').value; l.fontSize = Number($('type-size').value) || 64; l.bold = $('type-bold').classList.contains('active'); l.align = $('type-align').value; l.textMode = paragraph ? 'paragraph' : 'point';
+    applyDefaults(l);
     if (paragraph) { l.boxWidth = Math.max(l.fontSize,rect.width); l.boxHeight = Math.max(l.fontSize*1.35,rect.height); }
     l.parentId=state.parentAt?.(rect)??(current.type==='group'?current.id:current.parentId||null); p.layers.push(l); canonicalize(p); p.activeId = l.id;
     begin(l,true,before,dirty); state.changed('直接在画布上输入文字');

@@ -7,7 +7,7 @@ const { readPsd, writePsdBuffer, getLayerImageData, getLayerMaskImageData, getCo
 const {supportedColorModes}=require('ag-psd/dist/psdReader');if(!supportedColorModes.includes(4))supportedColorModes.push(4);
 const { validateProject, pngPixels, MAX_BYTES } = require('./project.cjs');
 const { importEffects, exportEffects, colorHex } = require('./psd-effects.cjs');
-const MAX_PIXELS = 64 * 1024 * 1024;
+const MAX_PIXELS = 16384 * 16384;
 initializeCanvas(() => { throw new Error('PSD 只能通过像素数据读取。'); }, (width, height) => {
   sizePixels(width, height); return { width, height, data: new Uint8ClampedArray(width * height * 4) };
 });
@@ -27,7 +27,7 @@ function sizePixels(w, h) {
   return Math.max(1, w) * Math.max(1, h);
 }
 function header(buffer) {
-  if (!Buffer.isBuffer(buffer) || buffer.length < 26 || buffer.length > MAX_BYTES || buffer.toString('ascii', 0, 4) !== '8BPS') throw new Error('PSD 文件损坏或超过 128 MB。');
+  if (!Buffer.isBuffer(buffer) || buffer.length < 26 || buffer.length > MAX_BYTES || buffer.toString('ascii', 0, 4) !== '8BPS') throw new Error('PSD 文件头损坏。');
   if (buffer.readUInt16BE(4) !== 1) throw new Error('暂不支持 PSB，请转换为 PSD。');
   if (buffer.readUInt16BE(22) !== 8 || ![3,4].includes(buffer.readUInt16BE(24))) throw new Error('当前支持 RGB / CMYK 8 位 PSD，请先转换颜色模式和位深。');
   sizePixels(buffer.readUInt32BE(18), buffer.readUInt32BE(14));
@@ -49,6 +49,10 @@ function header(buffer) {
     offset += length + length % 2;
   }
 }
+function readPsdPreview(buffer,profile) {
+  header(buffer);const psd=readPsd(buffer,{useImageData:true,useRawData:true,skipLayerImageData:true,skipThumbnail:true,skipLinkedFilesData:true,totalMemoryLimit:Infinity});
+  if(profile)require('./cmyk-psd.cjs').correctComposite(psd,buffer,profile);const pixels=profile?psd.imageData:getCompositeImageData(psd);if(!pixels)throw new Error('PSD 没有保存合成预览。');return{width:psd.width,height:psd.height,pixels};
+}
 function readPsdDocument(buffer,profile,options = {}) {
   header(buffer);
   const bitmapFields=(pixels,gray=false)=>{
@@ -61,7 +65,7 @@ function readPsdDocument(buffer,profile,options = {}) {
     return {pixels:{width:pixels.width,height:pixels.height,data,...(gray?{}:{bounds})}};
   };
   const validate=p=>validateProject(p,Boolean(options.rawPixels));
-  const psd = readPsd(buffer, { useImageData: true, useRawData: true, skipThumbnail: true, skipLinkedFilesData: true, totalMemoryLimit: 512 * 1024 * 1024 });
+  const psd = readPsd(buffer, { useImageData: true, useRawData: true, skipThumbnail: true, skipLinkedFilesData: true, totalMemoryLimit: Infinity });
   if(profile)require('./cmyk-psd.cjs').correctComposite(psd,buffer,profile);
   if (psd.imageResources?.pixelAspectRatio && psd.imageResources.pixelAspectRatio.aspect !== 1) throw new Error('当前只支持方形像素，请先转换 PSD 的像素长宽比。');
   let count = 0, pixels = 0;
@@ -69,10 +73,9 @@ function readPsdDocument(buffer,profile,options = {}) {
   const inspect = (nodes, depth = 0) => {
     if (depth > 10) throw new Error('PSD 图层组超过 10 层。');
     for (const node of nodes || []) {
-      if (++count > 100) throw new Error('PSD 超过 100 个图层或组。');
+      count++;
       if (!node.children) pixels += sizePixels((node.right || 0) - (node.left || 0), (node.bottom || 0) - (node.top || 0));
       if (node.mask) pixels += sizePixels((node.mask.right || 0) - (node.mask.left || 0), (node.mask.bottom || 0) - (node.mask.top || 0));
-      if (pixels > MAX_PIXELS) throw new Error('PSD 图层与蒙版合计超过 6400 万像素。');
       if (!toCanvasBlend[node.blendMode || 'normal']) unsupported.add('未支持的混合模式');
       if(node.adjustment&&!importAdjustment(node.adjustment))unsupported.add('暂未支持的调整图层');
       if (node.knockout || node.channelBlendingRestrictions?.length) unsupported.add('高级混合选项');
@@ -91,7 +94,7 @@ function readPsdDocument(buffer,profile,options = {}) {
   let resolution = psd.imageResources?.resolutionInfo?.horizontalResolution || 72;
   if (psd.imageResources?.resolutionInfo?.horizontalResolutionUnit === 'PPCM') resolution *= 2.54;
   resolution = Math.max(1, Math.min(9600, resolution));
-  const project = { format: 'com.compositor.windows', version: 7,colorMode:psd.colorMode===4?'CMYK':'RGB',...(profile?{colorProfile:{name:profile.name,data:Buffer.from(profile.bytes).toString('base64')}}:{}), width: psd.width, height: psd.height, resolution, colorSpace: 'sRGB', guides:(psd.imageResources?.gridAndGuidesInformation?.guides||[]).slice(0,200).map(g=>({id:crypto.randomUUID(),axis:g.direction==='vertical'?'x':'y',position:g.location})), layers: [], activeId: '' };
+  const project = { format: 'com.compositor.windows', version: 8,colorMode:psd.colorMode===4?'CMYK':'RGB',...(profile?{colorProfile:{name:profile.name,data:Buffer.from(profile.bytes).toString('base64')}}:{}), width: psd.width, height: psd.height, resolution, colorSpace: 'sRGB', guides:(psd.imageResources?.gridAndGuidesInformation?.guides||[]).slice(0,200).map(g=>({id:crypto.randomUUID(),axis:g.direction==='vertical'?'x':'y',position:g.location})), layers: [], activeId: '' };
   if (!count) {
     const pixels = (profile?psd.imageData:getCompositeImageData(psd));
     if (!pixels) throw new Error('PSD 包含未支持的内容，且没有可用的合成预览。请先栅格化相关图层。');
@@ -111,7 +114,7 @@ function readPsdDocument(buffer,profile,options = {}) {
           let geometry;try{geometry=decompose(matrix.slice(0,4));}catch{} const axisUniform=Math.abs(matrix[1]||0)<.0001&&Math.abs(matrix[2]||0)<.0001&&Math.abs((matrix[0]||1)-(matrix[3]||1))<.0001;
           const simple = !!geometry && t.orientation !== 'vertical' && !t.warp?.style?.match(/^(?!none$).+/) && runs.every(r => JSON.stringify({ ...style, ...r.style }) === JSON.stringify(style));
           if (simple) {
-            Object.assign(l, { type: 'text', text: t.text.replace(/\r/g, '\n').replace(/\n$/, ''), font: (style.font?.name || 'Microsoft YaHei').replace(/-?(Regular|Bold|Italic|MT)$/g, '').replace(/^MicrosoftYaHei$/, 'Microsoft YaHei'), psdFont: style.font?.name, fontSize: Math.max(1, Math.min(1000, (style.fontSize || 64) * Math.abs(matrix[0] || 1))), color: colorHex(style.fillColor), bold: Boolean(style.fauxBold || /Bold/i.test(style.font?.name || '')), textMode: t.shapeType === 'box' ? 'paragraph' : 'point', align: ['left','center','right'].includes(t.paragraphStyle?.justification) ? t.paragraphStyle.justification : 'left', textRasterCache: Boolean(bitmap) });
+            Object.assign(l, { type: 'text', text: t.text.replace(/\r/g, '\n').replace(/\n$/, ''), font: (style.font?.name || 'Microsoft YaHei').replace(/-?(Regular|Bold|Italic|MT)$/g, '').replace(/^MicrosoftYaHei$/, 'Microsoft YaHei'), psdFont: style.font?.name, fontSize: Math.max(1, Math.min(1000, (style.fontSize || 64) * Math.abs(matrix[0] || 1))), color: colorHex(style.fillColor), bold: Boolean(style.fauxBold || /Bold/i.test(style.font?.name || '')), textMode: t.shapeType === 'box' ? 'paragraph' : 'point', align: ['left','center','right','justify-left','justify-center','justify-right','justify-all'].includes(t.paragraphStyle?.justification) ? t.paragraphStyle.justification : 'left', textRasterCache: Boolean(bitmap) });
             l.italic=Boolean(style.fauxItalic||/Italic|Oblique/i.test(style.font?.name||''));l.underline=Boolean(style.underline);
             if(!axisUniform){l.fontSize=Math.max(1,Math.min(1000,style.fontSize||64));l.textGeometry={matrix:[...matrix]};}
             l.psdTextSource = t; l.textCacheOrigin = { x:l.x,y:l.y };
@@ -163,7 +166,6 @@ function writePsdDocument(project, composite) {
   });
   const resolution = project.resolution;
   const data = writePsdBuffer({ width: project.width, height: project.height, bitsPerChannel: 8, colorMode: 3, imageData, children: tree(null), imageResources: {gridAndGuidesInformation:{guides:(project.guides||[]).map(g=>({direction:g.axis==='x'?'vertical':'horizontal',location:g.position}))}, resolutionInfo: { horizontalResolution: resolution, horizontalResolutionUnit: 'PPI', widthUnit: 'Inches', verticalResolution: resolution, verticalResolutionUnit: 'PPI', heightUnit: 'Inches' } } }, { noBackground: true, generateThumbnail: false, trimImageData: false });
-  if (data.length > MAX_BYTES) throw new Error('PSD 导出超过 128 MB，请减少图层或缩小尺寸。');
   return data;
 }
-module.exports = { readPsdDocument, writePsdDocument };
+module.exports = { readPsdPreview, readPsdDocument, writePsdDocument };

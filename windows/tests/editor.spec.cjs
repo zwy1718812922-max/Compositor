@@ -173,7 +173,7 @@ test('纸张预设、单位和方向转换、保存预设、真实创建及分�
   await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, file);
   await menu('save'); await expect(page.locator('#document-name')).toHaveText('打印项目');
   const saved = JSON.parse(await fs.readFile(file, 'utf8'));
-  expect(saved.version).toBe(7); expect(saved.resolution).toBe(300); expect(saved.colorSpace).toBe('sRGB');
+  expect(saved.version).toBe(8); expect(saved.resolution).toBe(300); expect(saved.colorSpace).toBe('sRGB');
   for (const format of ['png', 'jpeg']) {
     const output = test.info().outputPath('300ppi.' + format);
     await app.evaluate(({ dialog }, target) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: target }); }, output);
@@ -210,7 +210,7 @@ test('搜索、A3 300ppi 预设和无效输入不会创建画布', async () => {
   await page.locator('#new-width').fill('');
   await expect(page.locator('#create-document')).toBeDisabled();
   await page.locator('#new-width').fill('8000'); await page.locator('#new-height').fill('9000');
-  await expect(page.locator('#create-document')).toBeDisabled();
+  await expect(page.locator('#create-document')).toBeEnabled();
   await page.locator('#new-height').fill('1000'); await page.locator('#new-resolution').fill('0');
   await expect(page.locator('#create-document')).toBeDisabled();
   await page.locator('#new-resolution').fill('72');
@@ -289,8 +289,8 @@ test('裁剪、画布锚点扩展、图像重采样保留文字、尺寸撤销�
   await menu('open'); await expect(page.locator('#document-name')).toHaveText('尺寸');
   expect(await displayImage()).toBe(before);
   const saved = JSON.parse(await fs.readFile(file, 'utf8')); expect(saved.layers[0].data).toBeTruthy(); expect(saved.layers[1].type).toBe('text'); expect(saved.resolution).toBe(300);
-  await menu('canvasSize'); await page.locator('#size-width').fill('9000'); await page.locator('#size-height').fill('9000');
-  await page.locator('#size-form button[type=submit]').click();if(!(await page.locator('#size-error').isVisible()))await expect(page.locator('#size-dialog')).toBeHidden(); await expect(page.locator('#size-error')).toContainText('6400 万');
+  await menu('canvasSize'); await page.locator('#size-width').fill('16385'); await page.locator('#size-height').fill('9000');
+  expect(await page.locator('#size-width').evaluate(i=>i.validity.rangeOverflow)).toBe(true);await page.locator('#size-form button[type=submit]').click();await expect(page.locator('#size-dialog')).toBeVisible();
   expect(await page.locator('#canvas-wrap').evaluate(c => parseInt(c.style.width))).toBe(640); await page.locator('#size-cancel').click();
 });
 

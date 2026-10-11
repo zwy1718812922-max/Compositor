@@ -1,5 +1,5 @@
 import { canvas, bounds, drawLayer, localPoint, textFont, textLines, transformPoint, MAX_PIXELS } from './editor.js';
-import {validateShape} from './shape-model.mjs';
+import {validateShape,normalizeShapeTransform} from './shape-model.mjs';
 import {validateArtboard} from './artboard-model.mjs';
 import {validateStyles} from './effect-model.mjs';
 import {selectionPath} from './selections.js';
@@ -20,7 +20,7 @@ export function clipSelection(ctx, layer, selection) {
 }
 
 export function checkSize(width, height) {
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 16384 || height > 16384 || width * height > MAX_PIXELS) throw new Error('尺寸须为 1–16384 的整数，画布总像素不超过 6400 万。');
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1 || width > 16384 || height > 16384 || width * height > MAX_PIXELS) throw new Error('尺寸须为 1–16384 的整数。');
 }
 
 function checkLayers(layers) {
@@ -35,7 +35,6 @@ function checkLayers(layers) {
       checkSize(m.canvas.width, m.canvas.height); pixels += m.canvas.width * m.canvas.height;
     }
   }
-  if (pixels > MAX_PIXELS) throw new Error('缩放后像素图层合计超过 6400 万像素，请先合并或删除部分图层。');
 }
 
 function offsetLayer(l, x, y) {
@@ -63,13 +62,12 @@ export function resizeImageProject(project, width, height, resolution, options={
   checkSize(width,height);if(!Number.isFinite(resolution)||resolution<1||resolution>9600)throw new Error('分辨率须为 1–9600 ppi。');
   const fx=width/project.width,fy=height/project.height,factor=Math.min(fx,fy),dimension=(n)=>Math.max(1,Math.round(n*factor));
   let total=0;for(const l of project.layers){if(l.canvas)total+=(l.type==='text'?l.canvas.width*l.canvas.height:dimension(l.canvas.width)*dimension(l.canvas.height));if(l.mask)total+=dimension(l.mask.canvas.width)*dimension(l.mask.canvas.height);}
-  if(total>MAX_PIXELS)throw new Error('调整后图层与蒙版合计超过 6400 万像素。');
   const resample=source=>{const w=dimension(source.width),h=dimension(source.height);checkSize(w,h);if(w===source.width&&h===source.height)return source;const pixels=canvas(w,h),ctx=pixels.getContext('2d');ctx.imageSmoothingEnabled=options.method!=='nearest';ctx.imageSmoothingQuality=options.method==='bilinear'?'low':'high';ctx.drawImage(source,0,0,w,h);return pixels;};
   const layers=project.layers.map((l,index)=>{
     const result={...l,x:l.x*fx,y:l.y*fy};
     if(l.type!=='group'&&l.type!=='adjustment'){const density=l.type==='text'?1:l.type==='shape'?Math.min(1,factor):factor;Object.assign(result,decompose(multiply([fx/density,0,0,fy/density],affine(l))));}
     if(l.canvas&&l.type!=='text'){result.canvas=resample(l.canvas);delete result.data;delete result._bounds;}
-    if(l.type==='shape'){const density=Math.min(1,factor),shape={...l.shape,width:l.shape.width*density,height:l.shape.height*density,strokeWidth:l.shape.strokeWidth*density,radii:l.shape.radii.map(r=>r*density)};result.shape=shape;}
+    if(l.type==='shape'){const density=Math.min(1,factor),shape={...l.shape,width:l.shape.width*density,height:l.shape.height*density,strokeWidth:l.shape.strokeWidth*density,radii:l.shape.radii.map(r=>r*density)};if(shape.vertexRadii)shape.vertexRadii=shape.vertexRadii.map(r=>r*density);result.shape=shape;normalizeShapeTransform(result);}
     if(l.type==='fill'){result.width=dimension(l.width);result.height=dimension(l.height);result.fill={...l.fill,...(l.fill.kind==='pattern'?{scale:Math.max(1,Math.min(1000,l.fill.scale*factor))}:{})};delete result._fill;}
     if(l.artboard)result.artboard={...l.artboard,width:Math.max(1,Math.round(l.artboard.width*fx)),height:Math.max(1,Math.round(l.artboard.height*fy))};
     if(l.styles){result.stylesModified=true;result.styles=Object.fromEntries(Object.entries(l.styles).map(([key,e])=>[key,{...e,...(e.size===undefined?{}:{size:e.size*factor}),...(e.distance===undefined?{}:{distance:e.distance*factor})}]));}

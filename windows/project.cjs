@@ -8,7 +8,7 @@ const { validateFill,validateAdjustment }=require('./src/fill-model.mjs');
 const {validateShape}=require('./src/shape-model.mjs');
 const {validateArtboard}=require('./src/artboard-model.mjs');
 const FORMAT = 'com.compositor.windows';
-const MAX_BYTES = 128 * 1024 * 1024;
+const MAX_BYTES = Infinity;
 const blends = ['source-over', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'difference', 'soft-light', 'hard-light'];
 function number(value, min, max) { return Number.isFinite(value) && value >= min && value <= max; }
 function pngPixels(data, limit = 16384) {
@@ -16,17 +16,17 @@ function pngPixels(data, limit = 16384) {
   const b = Buffer.from(data.slice(22), 'base64');
   if (b.length < 24 || b.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new Error('PNG 图片损坏。');
   const w = b.readUInt32BE(16), h = b.readUInt32BE(20);
-  if (!w || !h || w > limit || h > limit || w * h > 64 * 1024 * 1024) throw new Error('图层或蒙版图片尺寸超过限制。');
+  if (!w || !h || w > limit || h > limit || w * h > 16384 * 16384) throw new Error('图层或蒙版图片尺寸超过限制。');
   return w * h;
 }
 function validateProject(p, allowPixels = false) {
-  if (!p || p.format !== FORMAT || ![1, 2, 3, 4, 5, 6, 7].includes(p.version)) throw new Error('不支持的项目格式或版本。请打开 .ccomp 项目。');
+  if (!p || p.format !== FORMAT || ![1, 2, 3, 4, 5, 6, 7, 8].includes(p.version)) throw new Error('不支持的项目格式或版本。请打开 .ccomp 项目。');
   const limit = p.version === 1 ? 4096 : 16384;
-  if (![p.width, p.height].every(n => Number.isInteger(n) && number(n, 1, limit)) || p.width * p.height > 64 * 1024 * 1024) throw new Error('画布尺寸超过此项目版本的限制。');
+  if (![p.width, p.height].every(n => Number.isInteger(n) && number(n, 1, limit)) || p.width * p.height > 16384 * 16384) throw new Error('画布尺寸超过此项目版本的限制。');
   if (p.version >= 2 && (!number(p.resolution, 1, 9600) || p.colorSpace !== 'sRGB')) throw new Error('分辨率或颜色空间无效。');
   if(p.version<6&&(p.colorMode||p.colorProfile))throw new Error('CMYK 工作模式需要 v6。');
   if(p.version>=6){if(!['RGB','CMYK'].includes(p.colorMode))throw new Error('颜色模式无效。');if(p.colorMode==='CMYK'){const profile=p.colorProfile;if(!profile||typeof profile.name!=='string'||profile.name.length>200||typeof profile.data!=='string'||profile.data.length>6*1024*1024||!/^[A-Za-z0-9+/]+={0,2}$/.test(profile.data))throw new Error('CMYK 配置文件无效。');const b=Buffer.from(profile.data,'base64');if(b.length<128||b.length>4*1024*1024||b.toString('ascii',36,40)!=='acsp'||b.toString('ascii',16,20)!=='CMYK')throw new Error('需要 CMYK ICC 配置文件。');}}
-  if (!Array.isArray(p.layers) || p.layers.length < 1 || p.layers.length > 100) throw new Error('项目需要 1–100 个图层。');
+  if (!Array.isArray(p.layers) || p.layers.length < 1) throw new Error('项目至少需要一个图层。');
   const ids = new Set();
   let pixels = 0;
   const bitmapPixels = item => {
@@ -50,7 +50,7 @@ function validateProject(p, allowPixels = false) {
     if (l.psdEffects && JSON.stringify(l.psdEffects).length > 65536) throw new Error('PSD 样式元数据过大。');
     for(const t of [l,l.mask].filter(Boolean)){for(const key of ['flipX','flipY'])if(t[key]!==undefined&&(typeof t[key]!=='boolean'||p.version<7&&t[key]))throw new Error('翻转属性需要 v7。');if(t.scaleY!==undefined&&!number(t.scaleY,.01,100)||t.skew!==undefined&&!number(t.skew,-100,100))throw new Error('二维变换属性无效。');if(p.version<5&&(t.scaleY!==undefined||t.skew!==undefined))throw new Error('二维变换需要 v5。');}
     if(l.artboard){if(p.version<7||l.type!=='group'||l.parentId)throw new Error('画板需要 v7 根级图层组。');validateArtboard(l.artboard);}
-    if(l.type==='shape'){validateShape(l.shape);}
+    if(l.type==='shape'){validateShape(l.shape);if(l.shape.vertexRadii&&p.version<8)throw new Error('顶点圆角需要 v8。');}
     else if(l.type==='fill'){validateFill(l);if(l.fill.alpha!==undefined&&(p.version<7||!number(l.fill.alpha,0,1)))throw new Error('填充透明度需要 v7。');if(p.version<7)pixels+=l.width*l.height;if(l.fill.data)pixels+=pngPixels(l.fill.data,512);}
     else if(l.type==='adjustment')validateAdjustment(l);
     else if (l.type === 'raster') {
@@ -61,7 +61,7 @@ function validateProject(p, allowPixels = false) {
       if(l.strike!==undefined&&(p.version<7||typeof l.strike!=='boolean'))throw new Error('删除线属性无效。');
       if(l.fontWeight!==undefined&&!number(l.fontWeight,100,900)||['italic','underline'].some(k=>l[k]!==undefined&&typeof l[k]!=='boolean'))throw new Error('字体样式无效。');
       if(l.textGeometry){const m=l.textGeometry.matrix;if(!Array.isArray(m)||m.length!==6||!m.every(n=>number(n,-100000,100000)))throw new Error('PSD 文字矩阵无效。');decompose(m.slice(0,4));}
-      if (l.textMode !== undefined && !['point', 'paragraph'].includes(l.textMode) || l.align !== undefined && !['left', 'center', 'right'].includes(l.align) || l.lineHeight !== undefined && !number(l.lineHeight, .5, 5) || l.letterSpacing !== undefined && !number(l.letterSpacing, -100, 1000)) throw new Error('文字排版属性无效。');
+      if (l.textMode !== undefined && !['point', 'paragraph'].includes(l.textMode) || l.align !== undefined && !['left','center','right',...(p.version>=8?['justify-left','justify-center','justify-right','justify-all']:[])].includes(l.align) || l.lineHeight !== undefined && !number(l.lineHeight, .5, 5) || l.letterSpacing !== undefined && !number(l.letterSpacing, -100, 1000)) throw new Error('文字排版属性无效。');
       if (l.textMode === 'paragraph' && (!number(l.boxWidth, 1, 16384) || !number(l.boxHeight, 1, 16384))) throw new Error('段落文字框尺寸无效。');
       if (l.textRasterCache) pixels += bitmapPixels(l);
     } else if (l.data !== undefined || !l.artboard&&(l.x !== 0 || l.y !== 0) || l.scale !== 1 || l.rotation !== 0 || typeof l.collapsed !== 'boolean') throw new Error('图层组的变换或折叠状态无效。');
@@ -82,12 +82,10 @@ function validateProject(p, allowPixels = false) {
       chain.add(parent); parent = group.parentId;
     }
   }
-  if (pixels > 64 * 1024 * 1024) throw new Error('图层和蒙版总像素超过 6400 万，请缩小项目。');
   if (!ids.has(p.activeId)) throw new Error('当前图层不存在。');
   return p;
 }
 async function readProject(file) {
-  if ((await fs.stat(file)).size > MAX_BYTES) throw new Error('项目文件超过 128 MB。');
   return validateProject(JSON.parse(await fs.readFile(file, 'utf8')));
 }
 async function atomicWrite(file, data) {
@@ -100,7 +98,6 @@ async function atomicWrite(file, data) {
 async function saveProject(file, project) {
   validateProject(project);
   const data = JSON.stringify(project);
-  if (Buffer.byteLength(data) > MAX_BYTES) throw new Error('项目文件超过 128 MB。');
   await atomicWrite(file, data);
 }
 module.exports = { validateProject, readProject, saveProject, atomicWrite, pngPixels, MAX_BYTES };

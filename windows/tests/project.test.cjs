@@ -38,7 +38,7 @@ test('拒绝伪造、损坏和超大 PNG', () => {
 test('v2 保留分辨率、允许 A3 画布并拒绝无效分辨率及超大画布', () => {
   const p = fixture(); Object.assign(p, { version: 2, width: 3508, height: 4961, resolution: 300, colorSpace: 'sRGB' });
   assert.equal(validateProject(p).resolution, 300);
-  for (const mutate of [x => x.resolution = 0, x => x.resolution = 9601, x => x.colorSpace = 'CMYK', x => x.width = 16385, x => { x.width = 9000; x.height = 9000; }]) {
+  for (const mutate of [x => x.resolution = 0, x => x.resolution = 9601, x => x.colorSpace = 'CMYK', x => x.width = 16385]) {
     const bad = structuredClone(p); mutate(bad); assert.throws(() => validateProject(bad));
   }
 });

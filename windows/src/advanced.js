@@ -1,3 +1,5 @@
+import {applyMaskDefaults} from './property-defaults.js';
+import {normalizeShapeTransform} from './shape-model.mjs';
 import { hasEffects } from './effect-model.mjs';
 import { canvas, rasterLayer, groupLayer, layerSurface, invalidatePixels, updateLinkedMask, transformPoint, layerTransform } from './editor.js';
 import { checkSize } from './operations.js';
@@ -29,6 +31,7 @@ export function transformLayer(layer, values) {
     next.mask = { ...layer.mask }; updateLinkedMask(next, previous); const m = next.mask;
     if (Math.abs(m.x) > 100000 || Math.abs(m.y) > 100000 || m.scale < .01 || m.scale > 100 || Math.abs(m.rotation) > 36000) throw new Error('变换后蒙版超出限制，请先取消链接或栅格化。');
   }
+  normalizeShapeTransform(next);
   Object.assign(layer, next);
 }
 export function moveLayer(project, layer, dx, dy, maskOnly = false) {
@@ -66,7 +69,7 @@ export function advancedCommand(action, state) {
     const pixels = canvas(project.width, project.height), ctx = pixels.getContext('2d'), sel = state.selection;
     const hide = action === 'hideMask'; ctx.fillStyle = hide&&sel?'#ffffff':hide || sel ? '#000000' : '#ffffff'; ctx.fillRect(0, 0, pixels.width, pixels.height);
     if (sel) { ctx.fillStyle = hide ? '#000000' : '#ffffff';if(sel.canvas){if(hide){const temp=canvas(sel.width,sel.height),c=temp.getContext('2d');c.drawImage(sel.canvas,0,0);c.globalCompositeOperation='source-in';c.fillStyle='black';c.fillRect(0,0,temp.width,temp.height);ctx.drawImage(temp,sel.x,sel.y);}else ctx.drawImage(sel.canvas,sel.x,sel.y);}else ctx.fillRect(sel.x, sel.y, sel.width, sel.height); }
-    layer.mask = { canvas: pixels, x: 0, y: 0, scale: 1, scaleY:1,skew:0, rotation: 0, defaultColor: hide || sel ? 0 : 255, density: 1, feather: 0, enabled: true, linked: true };
+    layer.mask = { canvas: pixels, x: 0, y: 0, scale: 1, scaleY:1,skew:0, rotation: 0, defaultColor: hide || sel ? 0 : 255, density: 1, feather: 0, enabled: true, linked: true };applyMaskDefaults(layer.mask);
     setTarget('mask'); changed('已添加蒙版：黑色隐藏，白色显示。点击图像缩略图可返回图像编辑。');
   } else if (['toggleMask', 'linkMask', 'invertMask', 'deleteMask', 'applyMask'].includes(action)) {
     if (!layer.mask) throw new Error('请先为当前图层添加蒙版。');

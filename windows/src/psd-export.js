@@ -36,7 +36,7 @@ export function preparePsd(project) {
         }
       }
     }
-    if(layer.type==='text'&&(layer.paragraph||layer.strike))delete converted.psdText;
+    if(layer.type==='text'&&(layer.paragraph||layer.strike||(layer.align||'').startsWith('justify-')))delete converted.psdText;
     if (layer.mask) {
       const m = layer.mask;
       converted.mask = { ...converted.mask, ...bake(m, ctx => { layerTransform(ctx, m); ctx.drawImage(m.canvas, 0, 0); }, m.defaultColor) };

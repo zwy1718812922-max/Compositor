@@ -1,5 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('desktop', {
+  recentSource:payload=>ipcRenderer.invoke('recent:source',payload),
   openProject: file => ipcRenderer.invoke('project:open',file),
   colorProfile:kind=>ipcRenderer.invoke('color:profile',kind),
   saveProject: (project, saveAs) => ipcRenderer.invoke('project:save', project, saveAs),

@@ -4,9 +4,9 @@ import { childrenOf, ancestors, isVisible } from './layer-tree.js';
 import { paintFill, applyAdjustment } from './fill-renderer.js';
 import { applyEffects } from './effects.js';
 import { hasEffects } from './effect-model.mjs';
-import { paintShape } from './shape-model.mjs';
-import { layoutText } from './text-layout.js';
-export const MAX_PIXELS = 64 * 1024 * 1024;
+import { paintShape,normalizeShapeTransform } from './shape-model.mjs';
+import { layoutText,paintTextLine } from './text-layout.js';
+export const MAX_PIXELS = 16384 * 16384;
 const revisions = new WeakMap(), historyPixels = new WeakMap();
 export const pixelRevision = bitmap => revisions.get(bitmap) || 0;
 export function canvas(width, height) {
@@ -92,11 +92,10 @@ export function drawLayer(ctx, layer) {
   else {
     ctx.font = textFont(layer); ctx.textBaseline = 'top'; ctx.fillStyle = layer.color;
     ctx.letterSpacing = (layer.letterSpacing || 0) + 'px';
-    const size = bounds(layer); ctx.textAlign = layer.align || 'left';
+    const size = bounds(layer);
     if (layer.textMode === 'paragraph') { ctx.beginPath(); ctx.rect(0, 0, size.width, size.height); ctx.clip(); }
-    const x = ctx.textAlign === 'center' ? size.width / 2 : ctx.textAlign === 'right' ? size.width : 0;
     ctx.direction=layer.paragraph?.direction||'ltr';
-    layoutText(ctx,layer).lines.forEach(line => { const tx=layer.textMode==='paragraph'?line.x+(ctx.textAlign==='center'?line.width/2:ctx.textAlign==='right'?line.width:0):x;ctx.fillText(line.text,tx,line.y);const w=ctx.measureText(line.text).width,left=tx-(ctx.textAlign==='center'?w/2:ctx.textAlign==='right'?w:0);if(layer.underline)ctx.fillRect(left,line.y+layer.fontSize,w,Math.max(1,layer.fontSize/18));if(layer.strike)ctx.fillRect(left,line.y+layer.fontSize*.55,w,Math.max(1,layer.fontSize/18)); });
+    layoutText(ctx,layer).lines.forEach(line=>paintTextLine(ctx,layer,line,size));
   }
   ctx.restore();
 }
@@ -235,7 +234,7 @@ export function serialize(project, forHistory = false) {
     return {_bitmap:bitmap,...(item._bounds?{_bounds:{...item._bounds}}:{})};
   };
   return {
-    format: 'com.compositor.windows', version: 7,colorMode:project.colorMode||'RGB',...(project.colorProfile?{colorProfile:structuredClone(project.colorProfile)}:{}), guides:(project.guides || []).map(g=>({...g})), ruler:structuredClone(project.ruler || {unit:'px',origin:{x:0,y:0},visible:true,guidesVisible:true,locked:false}), width: project.width, height: project.height, resolution: project.resolution ?? 72, colorSpace: 'sRGB', activeId: project.activeId,
+    format: 'com.compositor.windows', version: 8,colorMode:project.colorMode||'RGB',...(project.colorProfile?{colorProfile:structuredClone(project.colorProfile)}:{}), guides:(project.guides || []).map(g=>({...g})), ruler:structuredClone(project.ruler || {unit:'px',origin:{x:0,y:0},visible:true,guidesVisible:true,locked:false}), width: project.width, height: project.height, resolution: project.resolution ?? 72, colorSpace: 'sRGB', activeId: project.activeId,
     layers: project.layers.map(layer => {
       const { canvas: pixels, mask, data, _bitmap, _surface, _bounds, _fill, _pattern, ...metadata } = layer;
       const output = pixels ? { ...structuredClone(metadata), ...bitmapFields(layer) } : structuredClone(metadata);
@@ -248,7 +247,7 @@ export async function decodeImage(data) {
   const image = new Image();
   image.src = data;
   await image.decode().catch(() => { throw new Error('图片无法读取，可能已损坏或格式不受支持。'); });
-  if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth > 16384 || image.naturalHeight > 16384 || image.naturalWidth * image.naturalHeight > MAX_PIXELS) throw new Error('图片过大，请先缩小至 6400 万像素以内。');
+  if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth > 16384 || image.naturalHeight > 16384 || image.naturalWidth * image.naturalHeight > MAX_PIXELS) throw new Error('图片超过当前绘图引擎的单边尺寸范围。');
   return image;
 }
 export async function deserialize(data) {
@@ -264,6 +263,7 @@ export async function deserialize(data) {
       else pixels.getContext('2d').drawImage(image, 0, 0);
       const restored={ ...metadata, canvas: pixels };if(raw?.bounds)restored._bounds=raw.bounds;layers.push(restored);
     }
+    normalizeShapeTransform(layers.at(-1));
     if(layer.fill?.data)layers.at(-1)._pattern=await decodeImage(layer.fill.data);
     if (layer.mask) {
       const {pixels:raw,_bitmap,...metadata}=layer.mask,image=raw||_bitmap||await decodeImage(layer.mask.data),pixels=canvas(image.width||image.naturalWidth,image.height||image.naturalHeight);
