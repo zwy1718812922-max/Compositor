@@ -8,6 +8,11 @@ function surfaceCache(){
 }
 export function previewRegion(project,view={}){
  if(view.source)return {x:0,y:0,width:project.width,height:project.height,scale:1};
+ if(view.matchDisplay&&view.scale&&view.width&&view.height&&view.pan){
+  const z=view.scale,x=Math.max(0,-view.pan.x/z),y=Math.max(0,-view.pan.y/z);
+  const right=Math.min(project.width,(view.width-view.pan.x)/z),bottom=Math.min(project.height,(view.height-view.pan.y)/z);
+  return{x,y,width:Math.max(1,right-x),height:Math.max(1,bottom-y),scale:z*(view.pixelRatio||1)};
+ }
  const large=project.width*project.height>MAX_PREVIEW_PIXELS;
  let scale=large?Math.min(1,view.scale*(view.pixelRatio||1)||1):1;
  let x=0,y=0,width=project.width,height=project.height;
@@ -42,7 +47,8 @@ export function renderPreview(target,project,background,proof=true,view={}){
   return proxy;
  });
  for(const id of state.layers.keys())if(!project.layers.some(l=>l.id===id))state.layers.delete(id);
- const width=Math.max(1,Math.round(region.width*scale)),height=Math.max(1,Math.round(region.height*scale));
+ const measure=view.matchDisplay?Math.ceil:Math.round;
+ const width=Math.max(1,measure(region.width*scale)),height=Math.max(1,measure(region.height*scale));
  if(target.width!==width)target.width=width;if(target.height!==height)target.height=height;
  target.style.width=region.width+'px';target.style.height=region.height+'px';target.style.left=region.x+'px';target.style.top=region.y+'px';
  target.dataset.originX=region.x;target.dataset.originY=region.y;target.dataset.worldWidth=region.width;target.dataset.worldHeight=region.height;

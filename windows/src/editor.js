@@ -1,4 +1,5 @@
 import { affine, inverse, multiply, vector, decompose } from './affine.mjs';
+import {getPreferences} from './preferences-store.mjs';
 import { colorProfile,proofPixels } from './color-engine.mjs';
 import { childrenOf, ancestors, isVisible } from './layer-tree.js';
 import { paintFill, applyAdjustment } from './fill-renderer.js';
@@ -278,8 +279,11 @@ export class History {
   reset() { this.undoStack = []; this.redoStack = []; }
   push(snapshot) {
     this.undoStack.push(snapshot); this.redoStack = [];
+    this.trim();
+  }
+  trim() {
     // Unchanged pixels share immutable canvases across undo entries.
     const size=()=>{let bytes=0;const seen=new Set();for(const s of this.undoStack)for(const l of s.layers)for(const item of [l,l.mask].filter(Boolean)){const pixels=item._bitmap;if(pixels){if(!seen.has(pixels)){seen.add(pixels);bytes+=pixels.width*pixels.height*4;}}else bytes+=(item.data?.length||item.text?.length||0);}return bytes;};
-    while (this.undoStack.length > 25 || (this.undoStack.length > 1 && size() > 192 * 1024 * 1024)) this.undoStack.shift();
+    while (this.undoStack.length > getPreferences().historySteps || (this.undoStack.length > 1 && size() > 192 * 1024 * 1024)) this.undoStack.shift();
   }
 }

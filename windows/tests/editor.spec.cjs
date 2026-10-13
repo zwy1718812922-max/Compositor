@@ -31,7 +31,7 @@ async function at(x, y) {
 }
 async function drag(x1, y1, x2, y2) {
   const a = await at(x1, y1), b = await at(x2, y2);
-  await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 8 }); await page.mouse.up();if(await page.locator('#layer-type').textContent()==='形状属性'&&await page.locator('.tools [data-tool=rect]').evaluate(b=>b.getAttribute('aria-pressed')==='true'))await menu('rasterize');
+  await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 8 }); await page.mouse.up();if((await page.locator('#layer-type').textContent()).startsWith('形状')&&await page.locator('.tools [data-tool=rect]').evaluate(b=>b.getAttribute('aria-pressed')==='true'))await menu('rasterize');
 }
 async function pixel(x, y) { return page.locator('#canvas').evaluate((c, p) => Array.from(c.getContext('2d').getImageData(Math.floor((p.x-Number(c.dataset.originX||0))*c.width/Number(c.dataset.worldWidth||c.width)),Math.floor((p.y-Number(c.dataset.originY||0))*c.height/Number(c.dataset.worldHeight||c.height)),1,1).data), { x, y }); }
 async function edit(id, value) {
@@ -391,7 +391,7 @@ test('同级多选分组、剪贴蒙版、组显示、组透明度、移动与�
   await expect(page.locator('#layer-count')).toHaveText('4 个图层'); expect(await pixel(250,250)).toEqual([0,0,255,255]);
   await page.locator('.layer-row.active button[aria-label="隐藏图层"]').click(); expect((await pixel(250,250))[3]).toBe(0);
   await page.locator('.layer-row.active button[aria-label="显示图层"]').click(); await edit('layer-opacity', 50); expect((await pixel(250,250))[3]).toBeCloseTo(128,-1);
-  await edit('layer-opacity', 100); if(await page.locator('#layer-type').textContent()==='形状属性')await menu('rasterize');await page.locator('[data-tool=move]').click(); await drag(250,250,270,280);
+  await edit('layer-opacity', 100); if((await page.locator('#layer-type').textContent()).startsWith('形状'))await menu('rasterize');await page.locator('[data-tool=move]').click(); await drag(250,250,270,280);
   expect((await pixel(110,110))[3]).toBe(0); expect(await pixel(270,280)).toEqual([0,0,255,255]);
   await menu('addMask'); await menu('duplicate'); await expect(page.locator('#layer-count')).toHaveText('7 个图层');
   await menu('invertMask'); await expect(page.locator('.mask-thumb')).toHaveCount(2); // Source group's mask stays white.
@@ -451,7 +451,7 @@ test('PSD 局部蒙版可以扩展到整个画布并通过白色画笔恢复原�
 
 test('移动自动选择按可见像素命中，变换控件开关与菜单键盘操作', async () => {
   await page.locator('#color').fill('#ff0000'); await page.locator('[data-tool=rect]').click(); await drag(100,100,300,300);
-  await page.locator('#color').fill('#0000ff'); await drag(500,100,700,300); if(await page.locator('#layer-type').textContent()==='形状属性')await menu('rasterize');await page.locator('[data-tool=move]').click(); await page.locator('#auto-select').check();
+  await page.locator('#color').fill('#0000ff'); await drag(500,100,700,300); if((await page.locator('#layer-type').textContent()).startsWith('形状'))await menu('rasterize');await page.locator('[data-tool=move]').click(); await page.locator('#auto-select').check();
   await drag(150,150,170,180); expect((await pixel(110,110))[3]).toBe(0); expect(await pixel(170,180)).toEqual([255,0,0,255]);
   await page.locator('#show-transform').uncheck(); expect(await page.locator('#overlay').evaluate(c => c.getContext('2d').getImageData(0,0,c.width,c.height).data.some(v=>v!==0))).toBe(false);
   await page.getByRole('button',{name:'编辑(E)',exact:true}).click(); await expect(page.getByRole('menuitem',{name:'后退一步 Ctrl+Z',exact:true})).toBeFocused(); await page.keyboard.press('Enter');

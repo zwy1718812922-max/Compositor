@@ -10,7 +10,7 @@ test.beforeEach(async()=>{
 test.afterEach(async()=>{if(app){await app.evaluate(({app})=>app.exit(0));await app.close();}expect(errors).toEqual([]);});
 async function command(action){await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false');const s=await page.evaluate(()=>Number(document.body.dataset.commandSerial||0));await app.evaluate(({BrowserWindow},v)=>BrowserWindow.getAllWindows()[0].webContents.send('command',v),action);await page.waitForFunction(v=>Number(document.body.dataset.commandSerial||0)>v,s);await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false'||!!document.querySelector('dialog[open]'));}
 async function point(x,y){return page.locator('#canvas-wrap').evaluate((c,p)=>{const b=c.getBoundingClientRect();return{x:b.x+p.x*b.width/parseFloat(c.style.width),y:b.y+p.y*b.height/parseFloat(c.style.height)};},{x,y});}
-async function drag(x,y,xx,yy){const a=await point(x,y),b=await point(xx,yy);await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y,{steps:8});await page.mouse.up();if(await page.locator('#layer-type').textContent()==='形状属性'&&await page.locator('.tools [data-tool=rect]').evaluate(b=>b.getAttribute('aria-pressed')==='true'))await command('rasterize');}
+async function drag(x,y,xx,yy){const a=await point(x,y),b=await point(xx,yy);await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y,{steps:8});await page.mouse.up();if((await page.locator('#layer-type').textContent()).startsWith('形状')&&await page.locator('.tools [data-tool=rect]').evaluate(b=>b.getAttribute('aria-pressed')==='true'))await command('rasterize');}
 const pixel=(x,y)=>page.locator('#canvas').evaluate((c,p)=>Array.from(c.getContext('2d').getImageData(Math.floor((p.x-Number(c.dataset.originX||0))*c.width/Number(c.dataset.worldWidth||c.width)),Math.floor((p.y-Number(c.dataset.originY||0))*c.height/Number(c.dataset.worldHeight||c.height)),1,1).data),{x,y});
 const image=async()=>{const data=await displayImage();return require('node:crypto').createHash('sha256').update(require('pngjs').PNG.sync.read(Buffer.from(data.slice(22),'base64')).data).digest('hex');};
 async function shape(){await page.locator('[data-tool=rect]').click();await drag(100,100,200,200);await page.locator('[data-tool=move]').click();}
@@ -67,6 +67,32 @@ test('移动吸附到图层与画布，显示真实间距，Ctrl 绕过、关闭
   await command('undo');await page.locator('#snap-enabled').uncheck();await drag(350,330,135,331);await expect(page.locator('#layer-x')).toHaveValue('105');await command('undo');await page.locator('#snap-enabled').check();
   const file=test.info().outputPath('snap.ccomp');await save(file);const before=await image();await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y);await page.keyboard.press('Escape');await page.mouse.up();await expect(page.locator('#smart-guides')).toBeHidden();await expect(page.locator('#dirty-dot')).toBeHidden();expect(await image()).toBe(before);
   await drag(350,330,619,331);await expect(page.locator('#layer-x')).toHaveValue('590');await save(file);const saved=JSON.parse(await fs.readFile(file,'utf8'));expect(saved.layers[2].x+50).toBe(640);
+});
+
+test('拖动图层时静止素材保持在快速预览，松开后恢复清晰预览',async()=>{
+  await shape();await page.locator('[data-tool=rect]').click();await drag(320,300,420,400);await page.locator('[data-tool=move]').click();
+  await page.waitForFunction(()=>document.querySelector('#canvas').dataset.quality==='native');
+  const stationary=await pixel(150,150),oldPosition=await pixel(350,350),newPosition=await pixel(470,350),start=await point(350,350),first=await point(390,350),second=await point(430,350);
+  const geometry=()=>page.locator('#canvas').evaluate(c=>({width:c.width,height:c.height,left:c.style.left,top:c.style.top,styleWidth:c.style.width,styleHeight:c.style.height}));
+  const stationaryRegion=()=>page.locator('#canvas').evaluate(c=>Array.from(c.getContext('2d').getImageData(0,0,180,180).data));
+  const initialGeometry=await geometry();
+  const initialRegion=await stationaryRegion();
+  await page.mouse.move(start.x,start.y);await page.mouse.down();
+  expect(await geometry()).toEqual(initialGeometry);
+  for(const p of [first,second]){
+    await page.mouse.move(p.x,p.y);await page.waitForTimeout(180);
+    expect(await page.locator('#canvas').getAttribute('data-quality')).toBe('preview');
+    expect(await geometry()).toEqual(initialGeometry);
+    expect(await pixel(150,150)).toEqual(stationary);
+    const currentRegion=await stationaryRegion();
+    expect(currentRegion.reduce((count,value,index)=>count+(value!==initialRegion[index]),0)).toBe(0);
+  }
+  expect(await pixel(350,350)).not.toEqual(oldPosition);
+  expect(await pixel(470,350)).not.toEqual(newPosition);
+  await page.mouse.up();expect(await geometry()).toEqual(initialGeometry);
+  await page.waitForFunction(()=>document.querySelector('#canvas').dataset.quality==='native');
+  expect(await geometry()).toEqual(initialGeometry);
+  expect(await pixel(150,150)).toEqual(stationary);
 });
 
 test('多选作为整体移动及吸附，链接蒙版跟随，锁定成员阻止整组移动',async()=>{

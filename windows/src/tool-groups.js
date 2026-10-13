@@ -7,6 +7,6 @@ export function setupToolGroups(state) {
   }
   function update(name){for(const [key,items] of Object.entries(groups)){const item=items.find(i=>i[0]===name);if(!item)continue;const [tool,label,icon]=item,b=buttons[key];b.querySelector('img').src='icons/'+icon+'.svg';b.dataset.tool=tool;b.title=label;b.setAttribute('aria-label',label);}}
   document.addEventListener('pointerdown',e=>{if(!e.target.closest('.tool-flyout,.tool-group'))close();});
-  document.addEventListener('keydown',e=>{if(e.key==='Escape')close();if(!state.canUse()||e.target.matches('input,textarea,select')||!e.shiftKey)return;const name=e.key.toLowerCase();if(name==='v'){e.preventDefault();state.setTool(state.tool()==='artboard'?'move':'artboard');}if(name==='u'){e.preventDefault();const names=groups.rect.map(i=>i[0]);state.setTool(names[(names.indexOf(state.tool())+1)%names.length]);}});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')close();if(!state.canUse()||e.target.matches('input,textarea,select')||!e.shiftKey||e.repeat)return;const name=e.key.toLowerCase();if(name==='v'){e.preventDefault();state.setTool(state.tool()==='artboard'?'move':'artboard');}if(name==='u'){e.preventDefault();const names=groups.rect.map(i=>i[0]);state.setTool(names[(names.indexOf(state.tool())+1)%names.length]);}});
   return{update};
 }

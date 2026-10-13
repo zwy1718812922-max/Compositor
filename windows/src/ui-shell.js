@@ -1,7 +1,7 @@
 const $ = id => document.getElementById(id);
 const menus = {
   '文件(F)': [['新建…', 'new', 'Ctrl+N'], ['打开项目或 PSD…', 'open', 'Ctrl+O'], ['导入图片…', 'import', 'Ctrl+I'], null, ['保存项目', 'save', 'Ctrl+S'], ['项目另存为…', 'saveAs', 'Ctrl+Shift+S'], ['导出 PNG / JPEG / PSD…', 'export', 'Ctrl+Shift+E'], null, ['关闭当前项目', 'closeDocument', 'Ctrl+W'], ['退出', 'close']],
-  '编辑(E)': [['后退一步', 'undo', 'Ctrl+Z'], ['前进一步', 'redo', 'Ctrl+Y'], null, ['复制可见画面', 'copyMerged', 'Ctrl+Shift+C'], ['粘贴图片为图层', 'pasteImage', 'Ctrl+Shift+V'], ['前景色填充', 'fillSelection', 'Shift+F5'], ['清除像素', 'clearSelection']],
+  '编辑(E)': [['后退一步', 'undo', 'Ctrl+Z'], ['前进一步', 'redo', 'Ctrl+Y'], null, ['复制可见画面', 'copyMerged', 'Ctrl+Shift+C'], ['粘贴图片为图层', 'pasteImage', 'Ctrl+Shift+V'], ['前景色填充', 'fillSelection', 'Shift+F5'], ['清除像素', 'clearSelection'], null, ['首选项…', 'preferences', 'Ctrl+K']],
   '图像(I)': [['图像大小…', 'imageSize'], ['画布大小…', 'canvasSize'], ['裁剪到选区', 'cropSelection'], null, ['图像调整…', 'adjust']],
   '图层(L)': [['创建填充或调整图层…','createFill'], ['新建图层', 'addLayer', 'Ctrl+Shift+N'], ['复制图层', 'duplicate', 'Ctrl+J'], ['删除图层', 'deleteLayer'], ['向上移动', 'raise'], ['向下移动', 'lower'], null, ['创建图层组', 'group', 'Ctrl+G'], ['取消图层分组', 'ungroup', 'Ctrl+Shift+G'], ['创建 / 释放剪贴蒙版', 'clipping', 'Ctrl+Alt+G'], null, ['添加显示蒙版', 'addMask'], ['添加隐藏蒙版', 'hideMask'], ['启用 / 停用蒙版', 'toggleMask'], ['链接 / 取消链接蒙版', 'linkMask'], ['蒙版反相', 'invertMask'], ['应用蒙版', 'applyMask'], ['删除蒙版', 'deleteMask'], null, ['栅格化文字', 'rasterize'], ['向下合并', 'mergeDown', 'Ctrl+E'], ['合并可见图层', 'mergeVisible', 'Ctrl+Shift+M']],
   '文字(Y)': [['新建 / 编辑文字（T 工具）', 'textTool'], ['栅格化文字', 'rasterize']],

@@ -6,6 +6,8 @@ export function setupTransformControls(state) {
   const element = document.getElementById('transform-controls');
   const positions = { nw:[0,0],n:[.5,0],ne:[1,0],e:[1,.5],se:[1,1],s:[.5,1],sw:[0,1],w:[0,.5],rotate:[.5,0] };
   const names = { nw:'左上',n:'上边',ne:'右上',e:'右边',se:'右下',s:'下边',sw:'左下',w:'左边',rotate:'旋转' };
+  const rotateSvg='<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 1 5 7M4 12l-2-5m2 5 5-2" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 12a8 8 0 1 1 5 7M4 12l-2-5m2 5 5-2" fill="none" stroke="#202020" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const rotateCursor='url("data:image/svg+xml,'+encodeURIComponent(rotateSvg)+'") 12 12, alias';
   let frame;
   function items() {
     const p = state.project(), active = state.active();
@@ -40,6 +42,9 @@ export function setupTransformControls(state) {
   for (const [key,[x,y]] of Object.entries(positions)) {
     const b = document.createElement('button'); b.type = 'button'; b.dataset.handle = key; b.style.left = x*100+'%'; b.style.top = y*100+'%'; b.setAttribute('aria-label',key === 'rotate' ? '旋转图层手柄' : names[key]+'缩放手柄'); b.title = key === 'rotate' ? '拖动旋转；Shift 按 15° 对齐' : '自由缩放；Shift 等比 · Alt 围绕中心';
     b.onpointerdown = event => start(event,key); element.append(b);
+  }
+  for(const key of ['nw','ne','se','sw']){
+    const b=document.createElement('button');b.type='button';b.dataset.rotateCorner=key;b.setAttribute('aria-label',names[key]+'旋转手柄');b.title='围绕中心旋转；Shift 按 15° 对齐';b.style.cursor=rotateCursor;b.onpointerdown=event=>start(event,'rotate');element.append(b);
   }
   function move(g, point, shift) {
     let fx = 1, fy = 1, angle = 0, matrix;

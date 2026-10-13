@@ -1,5 +1,9 @@
 # 验证记录
 
+## 当前开发版 — 首选项
+
+“编辑 → 首选项…”及 Ctrl+K 可从主页进入。定向 Electron UI 用例 `tests/preferences.spec.cjs` 验证取消不保存、保存后画布背景和透明网格生效、对齐吸附联动、撤销步数限制、最近项目显示数量、重启恢复和恢复默认。原生 WebView2 用例 `tests/preferences-native.cjs` 验证菜单入口、保存、重启恢复及 Ctrl+K。运行 `npm run build:lite` 后在本机通过；使用隔离配置，没有改动正式安装或用户项目。此项尚未发布为安装包。
+
 ## 0.10.0 — 2026-10-11
 
 33 个 Node 单元场景及 71 个打包 Electron UI 场景验证通过，共 104 个唯一场景。全量 UI 结果见 validation/ten/packaged-ui-final.json：70 个通过，最后新增的偏好设置用例因选中蒙版后属性标签隐藏而失败；将测试的宽高链接操作放在添加蒙版前，定向复测通过（defaults-final.json）。最后修正图像显示 CSS 后，17 个相关场景重新通过（preview-and-defaults-final.json），无跳过或重试。已有 AI 用例使用本机安装目录，验证 CPU 推理及 NPU 开关/回退，不据此宣称实际 NPU 硬件执行。

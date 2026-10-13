@@ -21,5 +21,5 @@ export function applyDefaults(layer) {
 export function applyMaskDefaults(mask){const saved=store.mask;if(saved){mask.density=Math.max(0,Math.min(1,Number(saved.density)||0));mask.feather=Math.max(0,Math.min(100,Number(saved.feather)||0));}return mask;}
 export function lastArtboard(){return structuredClone(store.artboard?.artboard||{width:1280,height:800,background:'#ffffff'});}
 export function setupPropertyDefaults(){
-  const panel=document.getElementById('properties-panel'),button=document.createElement('button');button.id='reset-property-defaults';button.className='wide-button';button.textContent='恢复默认参数';button.onclick=()=>{store={};persist();};panel.append(button);
+  const panel=document.getElementById('properties-panel'),details=document.createElement('details'),button=document.createElement('button');details.className='property-more';details.innerHTML='<summary>默认参数</summary>';button.id='reset-property-defaults';button.className='wide-button';button.textContent='恢复默认参数';button.onclick=()=>{store={};persist();};details.append(button);panel.append(details);
 }

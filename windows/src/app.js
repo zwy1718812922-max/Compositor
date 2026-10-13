@@ -13,6 +13,7 @@ import { copySelectionLayer } from './selection-copy.js';
 import { setupLayerMenu } from './layer-menu.js';
 import { setupPanels } from './panels.js';
 import { setupWorkspace } from './workspace.js';
+import { setupPreferences } from './preferences.js';
 import { initColorProfile } from './color-engine.mjs';
 import { setupBlur } from './blur.js';
 import { setupSelections,selectionPath,selectionOutline } from './selections.js';
@@ -43,8 +44,10 @@ let selection = null, cropRect = null, sizeMode = 'image', adjustment = null, ad
 let history = new History(),workspace,path=null,sourcePath=null;
 let editTarget = 'image'; const selectedIds = new Set();
 let propertiesUI,shapes,artboardUI,imageSize,colorTransaction=null;
-let savedColors = null, selectionAnchor=null,viewMotion,layerMenu,panels,toolGroups;
+let savedColors = null, selectionAnchor=null,viewMotion,layerMenu,panels,toolGroups,preferencesUI;
 let typeEditor, transformUI, snapping, fonts, brushCursor, rulers,selections, numericTransaction=null, documentOpen=true, transformSelected=true;
+const toolShortcuts={w:'objectSelect',v:'move',m:'select',c:'crop',g:'gradient',b:'brush',e:'eraser',t:'text',u:'rect',o:'ellipse',i:'eyedropper',h:'hand'};
+let shortcutPress=null,pendingShortcutRestore=null;
 const editSurface = () => editTarget === 'mask' && active().mask ? active().mask : active();
 function setTarget(target) {
   if (target === 'mask' && active().mask) {
@@ -126,7 +129,7 @@ function setZoom(value, center = { x: viewport.clientWidth / 2, y: viewport.clie
   pan = { x: center.x - (center.x - pan.x) * factor, y: center.y - (center.y - pan.y) * factor };
   zoom = next; applyView(interactive);
 }
-function render(override) { const renderProject=override||project;if(!documentOpen||workspace?.isHome())return;rulers?.update();const region=renderPreview(display,renderProject,undefined,true,{scale:zoom,pixelRatio:devicePixelRatio,pan,width:viewport.clientWidth,height:viewport.clientHeight,editingId:typeEditor?.editing?active().id:undefined});viewMotion?.rendered(project,region,override);drawOverlay();typeEditor?.update(); }
+function render(override) { const renderProject=override||project;if(!documentOpen||workspace?.isHome())return;rulers?.update();const view={scale:zoom,pixelRatio:devicePixelRatio,pan,width:viewport.clientWidth,height:viewport.clientHeight,editingId:typeEditor?.editing?active().id:undefined};const region=viewMotion?.renderDrag(renderProject,view)||renderPreview(display,renderProject,undefined,true,view);viewMotion?.rendered(project,region,override);drawOverlay();typeEditor?.update(); }
 function drawOverlay() {
   const ctx = overlay.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,overlay.width,overlay.height);ctx.scale(overlay.width/project.width,overlay.height/project.height);
   const layer = active();
@@ -161,6 +164,22 @@ function setTool(next) {
   viewport.style.cursor = ['move', 'hand', 'text'].includes(tool) ? { move: 'default', hand: 'grab', text: 'text' }[tool] : 'crosshair';
   $('property-hint').textContent = ['brush', 'eraser'].includes(tool) ? '在选中的可见像素图层上绘画。文字请新建图层后绘画。' : tool === 'move' ? '拖动图层移动；拖动手柄自由缩放；Shift 等比。Alt 拖动复制 / 手柄中心缩放；Ctrl 暂停吸附；Esc 取消。' : tool === 'text' ? '单击创建点文字，拖出框创建段落文字；单击已有文字继续编辑。Ctrl+Enter 完成，Esc 取消。' : '选择图层后，可在这里修改它的属性。';
   drawOverlay();
+}
+function releaseToolShortcut(force=false){
+  if(!shortcutPress)return;const press=shortcutPress;shortcutPress=null;clearTimeout(press.timer);
+  if((force||press.temporary)&&tool===press.target){if(gesture&&!force)pendingShortcutRestore={previous:press.previous,target:press.target};else setTool(press.previous);}
+}
+function completeToolShortcut(){
+  if(!pendingShortcutRestore)return;const {previous,target}=pendingShortcutRestore;pendingShortcutRestore=null;if(tool===target)setTool(previous);
+}
+function setupMoveOptions(){
+  const key='compositor.moveTool.v1';let saved={};try{saved=JSON.parse(localStorage.getItem(key))||{};}catch{}
+  if(typeof saved.autoSelect==='boolean')$('auto-select').checked=saved.autoSelect;
+  if(['layer','group'].includes(saved.mode))$('auto-select-mode').value=saved.mode;
+  if(typeof saved.showTransform==='boolean')$('show-transform').checked=saved.showTransform;
+  const persist=()=>{try{localStorage.setItem(key,JSON.stringify({autoSelect:$('auto-select').checked,mode:$('auto-select-mode').value,showTransform:$('show-transform').checked}));}catch{}};
+  for(const id of ['auto-select','auto-select-mode','show-transform'])$(id).addEventListener('change',persist);
+  return persist;
 }
 function icon(name) { const img = document.createElement('img'); img.src = 'icons/' + name + '.svg'; img.alt = ''; return img; }
 function thumbnail(item, mask = false) {
@@ -348,7 +367,7 @@ async function command(action,file=null) {
   if (action === 'selectAll' && document.activeElement?.matches('input,textarea')) { document.activeElement.select(); return; }
   if (typeEditor?.editing && ['undo','redo'].includes(action) && document.activeElement?.matches('input,textarea')) { document.execCommand(action); return; }
   if (busy || gesture || document.querySelector('dialog[open]')) return;
-  if((!documentOpen||workspace?.isHome())&&!['new','open','close','help','resetPanels'].includes(action)&&!action.startsWith('panel'))return;
+  if((!documentOpen||workspace?.isHome())&&!['new','open','close','help','resetPanels','preferences'].includes(action)&&!action.startsWith('panel'))return;
   if (typeEditor?.editing) typeEditor.finish();
   // Commit a pending text change before a menu accelerator operates on it.
   if (document.activeElement?.matches('input,textarea,select')) document.activeElement.blur();
@@ -358,13 +377,14 @@ async function command(action,file=null) {
     if(action==='duplicate'&&selection){const layer=copySelectionLayer(project,active(),selection);capacity(layer.canvas.width,layer.canvas.height);checkpoint();project.layers.splice(project.layers.indexOf(active())+1,0,layer);canonicalize(project);project.activeId=layer.id;selectedIds.clear();selectedIds.add(layer.id);selection=null;setTarget('image');changed('已将选区内的内容复制为新图层');return;}
     if(action==='editText'){if(active().type==='text')typeEditor.begin(active());return;}
     if(action==='resetPanels'){panels.reset();return;}
+    if(action==='preferences'){preferencesUI.open();return;}
     const hadBoards=project.layers.some(l=>l.artboard);if(advancedCommand(action,{project,checkpoint,changed,toast,capacity,selected:selectedIds,target:editTarget,setTarget,selection})){if(hadBoards&&['deleteLayer','duplicate'].includes(action)){artboardUI.normalize();resizeCanvas();refresh();render();}return;}
     if (action.startsWith('panel')) { panels.show(action.slice(5).toLowerCase()); return; }
     if (action === 'toggleSnap') { snapping.toggle(); return; }
     if(rulers?.command(action))return;
     if(action==='createFill'){fillEditor.menu();return;}
     if (action === 'textTool') { setTool('text'); return; }
-    if (action === 'freeTransform') { transformSelected=true;setTool('move'); $('show-transform').checked = true; drawOverlay(); toast('拖动手柄自由缩放；Shift 等比 · Alt 中心变换 · Esc 取消'); return; }
+    if (action === 'freeTransform') { transformSelected=true;setTool('move'); $('show-transform').checked = true;persistMoveOptions();drawOverlay(); toast('拖动手柄自由缩放；Shift 等比 · Alt 中心变换 · Esc 取消'); return; }
     if (action === 'new') { newDocument.open(); }
     else if (action === 'open') {
       const opened = await result(api.openProject(file)); if (!opened) return;
@@ -577,7 +597,7 @@ viewport.addEventListener('pointerdown', event => {
       }
     }
   }
-  if (gesture) { viewport.setPointerCapture(event.pointerId); $('canvas-tip').hidden = true;if(gesture.kind==='move')drawOverlay(); }
+  if (gesture) { viewport.setPointerCapture(event.pointerId); $('canvas-tip').hidden = true;if(gesture.kind==='move'){viewMotion?.beginDrag(gesture);drawOverlay();} }
 });
 function shapePath(ctx, g) {
   const x = Math.min(g.start.x, g.end.x), y = Math.min(g.start.y, g.end.y);
@@ -649,11 +669,12 @@ if(g.kind==='shapeRadius'){shapes.finish(g,event?.type==='pointercancel');return
   if(g.kind==='pan'||viewport.dataset.viewUpdating==='true')applyView(true);
 }
 viewport.addEventListener('pointerup', finishGesture); viewport.addEventListener('pointercancel', finishGesture);
-window.addEventListener('blur', () => { space = false; finishGesture();viewport.style.cursor=tool==='hand'?'grab':tool==='text'?'text':'default';brushCursor?.update(); });
+viewport.addEventListener('pointerup', completeToolShortcut);viewport.addEventListener('pointercancel', completeToolShortcut);
+window.addEventListener('blur', () => { space = false; finishGesture();releaseToolShortcut(true);completeToolShortcut();viewport.style.cursor=tool==='hand'?'grab':tool==='text'?'text':'default';brushCursor?.update(); });
 window.addEventListener('keydown', event => {
   if (['transform','move','shapeRadius','artboardTransform','artboardCreate'].includes(gesture?.kind) && event.key === 'Escape') { event.preventDefault(); const g = gesture; gesture = null; if(g.kind==='shapeRadius')shapes.finish(g,true);else if(g.kind==='artboardTransform')artboardUI.finish(g,true);else if(g.kind==='artboardCreate')drawOverlay();else (g.kind === 'move' ? snapping : transformUI).cancel(g); return; }
   if(event.defaultPrevented)return;
-  if(event.ctrlKey&&!event.isComposing){const input=event.target.matches('input,textarea,select'),letter=event.key.toLowerCase();if(input&&['a','c','x','v','z','y'].includes(letter)&&!event.shiftKey)return;const key=(event.shiftKey?'shift+':'')+(event.altKey?'alt+':'')+letter,commands={n:'new',w:'closeDocument',r:'toggleRulers',';':'toggleGuides',o:'open',i:'import',s:'save','shift+s':'saveAs','shift+e':'export',z:'undo','shift+z':'redo',y:'redo',j:'duplicate',g:'group','shift+g':'ungroup','alt+g':'clipping',t:'freeTransform',e:'mergeDown','shift+m':'mergeVisible',a:'selectAll',d:'deselect','0':'fit','1':'actual','shift+c':'copyMerged','shift+v':'pasteImage','shift+n':'addLayer'};if(commands[key]){event.preventDefault();command(commands[key]);return;}}
+  if(event.ctrlKey&&!event.isComposing){const input=event.target.matches('input,textarea,select'),letter=event.key.toLowerCase();if(input&&['a','c','x','v','z','y'].includes(letter)&&!event.shiftKey)return;const key=(event.shiftKey?'shift+':'')+(event.altKey?'alt+':'')+letter,commands={n:'new',w:'closeDocument',r:'toggleRulers',';':'toggleGuides',o:'open',i:'import',s:'save','shift+s':'saveAs','shift+e':'export',z:'undo','shift+z':'redo',y:'redo',j:'duplicate',g:'group','shift+g':'ungroup','alt+g':'clipping',t:'freeTransform',e:'mergeDown','shift+m':'mergeVisible',a:'selectAll',d:'deselect','0':'fit','1':'actual','shift+c':'copyMerged','shift+v':'pasteImage','shift+n':'addLayer',k:'preferences'};if(commands[key]){event.preventDefault();command(commands[key]);return;}}
   if(!event.defaultPrevented&&event.ctrlKey&&event.key.toLowerCase()==='w'){event.preventDefault();command('closeDocument');return;}
   if(!documentOpen||workspace?.isHome())return;
   if (event.isComposing || event.target.matches('input,textarea,select') || event.target.closest('[role=menu]') || document.querySelector('dialog[open]')) return;
@@ -661,8 +682,8 @@ window.addEventListener('keydown', event => {
   if(event.shiftKey&&event.key==='F5'){event.preventDefault();command('fillSelection');return;}
   if (event.ctrlKey || event.metaKey || event.altKey || busy || gesture) return;
   if(['brush','eraser'].includes(tool)&&(event.code==='BracketLeft'||event.code==='BracketRight'||['[',']','【','】'].includes(event.key))){event.preventDefault();const input=$('brush-size'),old=Number(input.value),step=old<10?1:old<100?5:old<200?10:25,direction=event.code==='BracketLeft'||['[','【'].includes(event.key)?-1:1;input.value=clamp(old+step*direction,1,500);input.dispatchEvent(new Event('input',{bubbles:true}));brushCursor.update();return;}
-  const shortcuts = { w:'objectSelect',v: 'move', m: 'select', c: 'crop', g: 'gradient', b: 'brush', e: 'eraser', t: 'text', u: 'rect', o: 'ellipse', i: 'eyedropper', h: 'hand' };
-  if (shortcuts[event.key.toLowerCase()]) setTool(shortcuts[event.key.toLowerCase()]);
+  const shortcut=!event.shiftKey&&toolShortcuts[event.key.toLowerCase()];
+  if(shortcut){event.preventDefault();if(event.repeat)return;if(shortcutPress)releaseToolShortcut();if(shortcut!==tool){const press={code:event.code,previous:tool,target:shortcut,temporary:false,timer:null};shortcutPress=press;setTool(shortcut);press.timer=setTimeout(()=>{if(shortcutPress===press)press.temporary=true;},250);}return;}
   if (event.key.toLowerCase() === 'x') $('swap-colors').click();
   if (event.key.toLowerCase() === 'd') { $('color').value = '#000000'; $('gradient-color').value = '#ffffff';$('gradient-color').dispatchEvent(new Event('input',{bubbles:true}));$('color').dispatchEvent(new Event('input',{bubbles:true})); colorSwatches(); }
   if (event.key === 'Escape') command('deselect');
@@ -674,7 +695,7 @@ window.addEventListener('keydown', event => {
     try { moveLayer(project, active(), event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0, event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0, editTarget === 'mask' && !active().mask.linked); changed(); } catch (error) { toast(error.message); }
   }
 });
-window.addEventListener('keyup', event => { if(event.code==='Space'){space=false;viewport.style.cursor=gesture?.kind==='pan'?'grabbing':tool==='hand'?'grab':tool==='text'?'text':['move'].includes(tool)?'default':'crosshair';brushCursor?.update();} });
+window.addEventListener('keyup', event => {if(shortcutPress?.code===event.code){releaseToolShortcut();return;}if(event.code==='Space'){space=false;viewport.style.cursor=gesture?.kind==='pan'?'grabbing':tool==='hand'?'grab':tool==='text'?'text':['move'].includes(tool)?'default':'crosshair';brushCursor?.update();} });
 viewport.addEventListener('dblclick',event=>{if(!documentOpen||busy||space||tool!=='move'||gesture)return;const p=point(event),hit=hitLayer(project,p),found=hit?.type==='text'?hit:project.layers.slice().reverse().find(l=>l.type==='text'&&isVisible(project,l)&&project.layers.indexOf(l)>project.layers.indexOf(hit)&&(()=>{const q=localPoint(l,p),b=bounds(l);return q.x>=0&&q.y>=0&&q.x<=b.width&&q.y<=b.height;})());if(found&&!isLocked(project,found)){event.preventDefault();typeEditor.begin(found);}});
 document.addEventListener('dragover', event => event.preventDefault());
 document.addEventListener('drop', event => event.preventDefault());
@@ -743,7 +764,9 @@ workspace=setupWorkspace({api,capture:()=>({project,name,dirty,path,sourcePath,h
   close:id=>{if(workspace.activate(id))command('closeDocument');},open:file=>command('open',file),
   thumbnail:p=>viewMotion.thumbnail(p),release:p=>viewMotion.release(p)
 });
+preferencesUI=setupPreferences({refreshRecents:()=>workspace.drawRecents(),trimHistory:()=>{history.trim();for(const doc of workspace.documents)doc.history?.trim();},toast});
 setupPropertyDefaults();
+const persistMoveOptions=setupMoveOptions();
 newProject(1280, 800, 'transparent', '未命名',72,false);documentOpen=false;document.body.classList.add('no-document');workspace.showHome();
 setTool('move');
 setBusy(false);

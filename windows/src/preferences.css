@@ -1,0 +1,10 @@
+#viewport{background:var(--workspace-background,#262626)}
+#canvas-wrap,.artboard-paper.transparent{background-size:var(--checker-size,16px) var(--checker-size,16px)}
+#preferences-dialog{width:480px;max-width:calc(100vw - 32px);max-height:calc(100vh - 40px);overflow:auto;padding:24px;background:#3d3d3d}
+#preferences-dialog fieldset{border:1px solid #666;border-radius:4px;margin:18px 0;padding:14px 16px 16px}
+#preferences-dialog legend{padding:0 5px;color:#ddd;font-size:13px}
+#preferences-dialog fieldset>label{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:12px 0;font-size:12px}
+#preferences-dialog fieldset>label select{width:166px;flex:none}
+#preferences-dialog .preference-check{justify-content:flex-start;gap:9px}
+#preferences-dialog small{display:block;color:#bbb;line-height:1.7}
+#preferences-dialog .dialog-actions{margin-top:20px}

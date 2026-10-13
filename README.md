@@ -1,8 +1,24 @@
 # Compositor
 
-本地版本管理说明见 [Git 工作流程](docs/git-workflow.zh-CN.md)。
+这是基于 [robbietilton/Compositor](https://github.com/robbietilton/Compositor) 开发的中文 Windows 移植仓库，同时保留原版 macOS 源码。Windows 版使用本地 WebView2 / WinForms / Canvas 2D，并提供 Electron 兼容版；采用 [MIT 许可证](LICENSE)。
 
-> **中文 Windows 11 版 0.9.0（本地移植）**：见 [使用说明](windows/README.zh-CN.md)。双击根目录的 `启动中文版.cmd`，或使用 `windows/dist` 中轻量安装包。新增原始分辨率实时缩放、普通滚轮平移/Alt 缩放/空格抓手、PS 风格属性与拾色器、可编辑形状和拖动圆角、后台图像大小调整、多个画板及分别导出；最近项目预览采用完整颜色合成。保留分层 PSD、文字、蒙版、FX、多文档、字体收藏、标尺、CMYK 与独立 AI/NPU 抠图组件。原 macOS 源码保留不变。
+## 中文 Windows 版
+
+当前版本为 **0.10.0**，主分支还包含首选项等开发更新。支持分层 PSD、文字、蒙版、FX、多文档、矢量形状、画板、CMYK 和独立安装的本地 AI 抠图组件。功能及兼容范围见 [Windows 使用说明](windows/README.zh-CN.md)。
+
+安装 Node.js 后，可从源码启动 Electron 兼容版：
+
+```sh
+cd windows
+npm ci
+npm start
+```
+
+Windows 轻量版的构建方式见 [Windows 使用说明](windows/README.zh-CN.md)。本地版本管理说明见 [Git 工作流程](docs/git-workflow.zh-CN.md)。
+
+## 原版 macOS 项目说明
+
+以下为上游项目的介绍与安装信息；链接指向原作者发布的 macOS 版本。
 
 Adobe Photoshop costs too much and tools like GIMP don’t feel familiar enough for me to stay in flow. That’s why I built Compositor.
 
@@ -111,3 +127,5 @@ It needs, all kept outside this repository:
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+中文许可说明见 [开源许可说明](docs/license.zh-CN.md)。原项目版权声明保留；Windows 移植及后续修改同样采用 MIT 许可证，第三方组件遵循各自许可证。

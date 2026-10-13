@@ -26,7 +26,7 @@ document.addEventListener('pointerdown',event=>{if(event.button===0&&event.targe
 document.addEventListener('keydown',event=>{
   if(event.isComposing)return;
   if(event.ctrlKey){const input=event.target.matches('input,textarea,select');if(input&&['a','c','x','v','z','y'].includes(event.key.toLowerCase())&&!event.shiftKey)return;
-    const key=(event.shiftKey?'shift+':'')+(event.altKey?'alt+':'')+event.key.toLowerCase(),commands={n:'new',w:'closeDocument',r:'toggleRulers',';':'toggleGuides',o:'open',i:'import',s:'save','shift+s':'saveAs','shift+e':'export',z:'undo','shift+z':'redo',y:'redo',j:'duplicate',g:'group','shift+g':'ungroup','alt+g':'clipping',t:'freeTransform',e:'mergeDown','shift+m':'mergeVisible',a:'selectAll',d:'deselect','0':'fit','1':'actual','shift+c':'copyMerged','shift+v':'pasteImage','shift+n':'addLayer'};
+    const key=(event.shiftKey?'shift+':'')+(event.altKey?'alt+':'')+event.key.toLowerCase(),commands={n:'new',w:'closeDocument',r:'toggleRulers',';':'toggleGuides',o:'open',i:'import',s:'save','shift+s':'saveAs','shift+e':'export',z:'undo','shift+z':'redo',y:'redo',j:'duplicate',g:'group','shift+g':'ungroup','alt+g':'clipping',t:'freeTransform',e:'mergeDown','shift+m':'mergeVisible',a:'selectAll',d:'deselect','0':'fit','1':'actual','shift+c':'copyMerged','shift+v':'pasteImage','shift+n':'addLayer',k:'preferences'};
     if(commands[key]){event.preventDefault();listeners.forEach(fn=>fn(commands[key]));}
   }else if(event.key==='F5'){event.preventDefault();if(event.shiftKey)listeners.forEach(fn=>fn('fillSelection'));}
 },true);

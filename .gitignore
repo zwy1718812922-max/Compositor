@@ -22,6 +22,7 @@ xcuserdata/
 # Claude Code settings personal to this machine
 .claude/settings.local.json
 BUILD_PLAN.md
+DEVELOPMENT_CONTEXT.md
 
 # Windows desktop port
 node_modules/
