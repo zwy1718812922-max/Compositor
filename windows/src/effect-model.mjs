@@ -13,6 +13,7 @@ export function defaultEffect(type) {
   return value;
 }
 export function hasEffects(layer) { return layer.stylesEnabled !== false && Object.values(layer.styles || {}).some(e => e.enabled); }
+export function effectPadding(layer){return layer.stylesEnabled===false?2:Math.ceil(Math.max(2,...Object.values(layer.styles||{}).filter(e=>e.enabled).map(e=>(e.distance||0)+(e.size||0)*3+2)));}
 export function validateStyles(styles) {
   if (!styles || typeof styles !== 'object' || Array.isArray(styles) || Object.keys(styles).some(k => !effectNames[k])) throw new Error('图层样式类型无效。');
   const ranges = { opacity: [0, 1], shadowOpacity: [0, 1], size: [0, 250], angle: [-360, 360], distance: [0, 1000], spread: [0, 100], depth: [0, 1000], altitude: [0, 90], textureDepth: [0, 100] };

@@ -9,20 +9,21 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="new-document.css">
   <link rel="stylesheet" href="advanced-ui.css">
+  <link rel="stylesheet" href="filter-editor.css">
   <link rel="stylesheet" href="workspace-tools.css">
   <link rel="stylesheet" href="workspace.css">
   <link rel="stylesheet" href="panels.css"><link rel="stylesheet" href="photoshop-controls.css"><link rel="stylesheet" href="preferences.css"><link rel="stylesheet" href="property-panel.css">
 </head>
 <body>
-  <section id="startup-screen" role="status" aria-label="正在启动"><div class="startup-logo">C</div><h1>Compositor</h1><p>中文版 · Windows 11</p><div class="startup-track"><span></span></div><small id="startup-message">正在准备编辑工作区…</small></section>
+  <section id="startup-screen" role="status" aria-label="正在启动"><img class="startup-logo" src="../assets/icon.png" width="70" height="70" alt=""><h1>Compositor</h1><p>中文版 · Windows 11</p><div class="startup-track"><span></span></div><small id="startup-message">正在准备编辑工作区…</small></section>
   <header class="topbar">
-    <span class="brand-icon">C</span><nav id="menu-bar" aria-label="应用菜单"></nav>
+    <img class="brand-icon" src="../assets/icon.png" width="23" height="23" alt=""><nav id="menu-bar" aria-label="应用菜单"></nav>
     <div class="document"><span id="document-name">未命名</span><span id="dirty-dot" hidden> ●</span></div>
     <div class="window-actions"><button data-window="minimize" aria-label="最小化"><img src="icons/minus.svg" alt=""></button><button data-window="maximize" aria-label="最大化或还原"><img src="icons/rectangle.svg" alt=""></button><button data-window="close" aria-label="关闭窗口"><img src="icons/x.svg" alt=""></button></div>
   </header>
   <div class="optionsbar">
     <strong id="tool-name">移动工具</strong><span class="separator"></span>
-    <span id="move-options"><label><input id="auto-select" type="checkbox">自动选择</label><select id="auto-select-mode" aria-label="自动选择类型"><option value="layer">图层</option><option value="group">组</option></select><label><input id="show-transform" type="checkbox" checked>显示变换控件</label><label title="吸附到画布、图层边缘和中心；拖动时按 Alt 暂停"><input id="snap-enabled" type="checkbox" checked>对齐吸附</label></span>
+    <span id="move-options"><label><input id="auto-select" type="checkbox">自动选择</label><select id="auto-select-mode" aria-label="自动选择类型"><option value="layer">图层</option><option value="group">组</option></select><label><input id="show-transform" type="checkbox" checked>显示变换控件</label><label title="吸附到画布、图层边缘和中心；拖动时按 Alt 暂停"><input id="snap-enabled" type="checkbox" checked>对齐吸附</label><label id="zoom-step-control" hidden title="Alt＋滚轮缩放步进；向左更精细，向右更快"><span>缩放步进</span><input id="zoom-step" type="range" min="1" max="20" step="1" value="5" aria-label="Alt 滚轮缩放步进"><output id="zoom-step-value" for="zoom-step">5%</output></label></span>
     <button id="text-options" hidden>文字属性…</button>
     <div id="type-options" hidden><select id="type-font" aria-label="文字工具字体"><option value="Microsoft YaHei">微软雅黑</option><option value="SimSun">宋体</option><option value="SimHei">黑体</option><option value="Segoe UI">Segoe UI</option><option value="Arial">Arial</option></select><input id="type-size" type="number" min="1" max="1000" value="64" aria-label="文字工具字号"><button id="type-bold" title="粗体">B</button><input id="type-color" type="color" value="#7aa2ff" aria-label="文字工具颜色"><select id="type-align" aria-label="文字对齐"><option value="left">左对齐</option><option value="center">居中对齐</option><option value="right">右对齐</option><option value="justify-left">末行左对齐</option><option value="justify-center">末行居中对齐</option><option value="justify-right">末行右对齐</option><option value="justify-all">全部两端对齐</option></select><button id="type-cancel" hidden>取消</button><button id="type-commit" hidden>完成 ✓</button></div>
     <label id="tool-color-label">颜色 <button id="tool-color" aria-label="选择前景颜色" title="选择前景颜色"></button></label>

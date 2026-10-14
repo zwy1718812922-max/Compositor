@@ -1,11 +1,11 @@
-# Windows project format v1–v8
+# Windows project format v1–v10
 
-Windows 0.10.0 saves v8 and reads v1–v7. See [v8 rounding/alignment](../docs/windows-format-v8.md). See [v7 shapes/artboards/paragraphs](../docs/windows-format-v7.md), [v6 color modes](../docs/windows-format-v6.md), [v5 additions](../docs/windows-format-v5.md) and [v4 additions](../docs/windows-format-v4.md). The native WebView2 and Electron builds use the same renderer, schema validation, and PSD conversion code.
+Windows 0.10.0 saves v10 and reads v1–v9. See [v10 local AI beauty](../docs/windows-format-v10.md), [v9 editable filters](../docs/windows-format-v9.md), [v8 rounding/alignment](../docs/windows-format-v8.md), [v7 shapes/artboards/paragraphs](../docs/windows-format-v7.md), [v6 color modes](../docs/windows-format-v6.md), [v5 additions](../docs/windows-format-v5.md) and [v4 additions](../docs/windows-format-v4.md). The native WebView2 and Electron builds use the same renderer, schema validation, and PSD conversion code.
 
 The Windows port uses a separate UTF-8 JSON format, with extension `.ccomp`, to avoid claiming compatibility with the upstream macOS `.comp` package. The macOS manifest schema and `ProjectManifest.current` are unchanged.
 
 - `format`: `com.compositor.windows`
-- `version`: `8` for new saves; versions `1`–`7` remain readable
+- `version`: `10` for new saves; versions `1`–`9` remain readable
 - `width`, `height`: integer document pixels, each 1–16384 in v2; v1 remains limited to 4096
 - `resolution`: pixels/inch, finite 1–9600, required by v2; v1 defaults to 72 on load
 - `colorSpace`: `sRGB`, required by v2

@@ -1,5 +1,111 @@
 # 验证记录
 
+## 当前开发版 — 第二步完整模型本地美颜，2026-10-14
+
+- 原模型 SHA256 下载校验及四个完整网络严格加载通过；FP32 OpenVINO 转换完成。原皮肤分割的 `tf_crop_and_resize` 不受 OpenVINO 支持，改用 ONNX Runtime CPU 执行原始图。真实 ModelScope 人像样本检测、修肤、瑕疵检测/修补通过；没有使用年龄模型或轻量网络。模型来源和许可证见 `ai/BEAUTY_MODELS.md`。
+- `tests/beauty.test.cjs` 两项通过：透明度、零蒙版、人脸开关、局部去痘范围，v10/v9 格式边界及错误缓存。仅补跑四个共享滤镜模型/格式测试；没有运行全仓库或图层面板测试。
+- `scripts/native-beauty.cjs` 真实 WebView2 验收通过：双人检测、分别运行完整模型和设置不同参数；原 PNG 保持，v10 保存/重开，无模型重算即可调节；框选去痘和取消当前 AI 任务不改已保存项目。样本中 Alpha 变化 0、人脸 ROI 外变化 0；局部/整幅差 0、分块 PNG 差 0、PSD 烘焙差 0。JPEG 全幅准备能合成不透明底色；未声称有损 JPEG 文件逐像素相同。关闭文档登记资源 0，页面错误 0。证据 `validation/beauty/native/result.json`、`window.png`、`result.png`；目视发现并修复裁切边缘硬边后定向复测。
+- 额外编辑路径定向检查 `validation/beauty/editor-smoke.cjs` 通过：打开/确认预加载模型缓存，素材命中正常，源修订后同步合成无缺缓存异常，跨 Worker 克隆的紧凑缓存标识保持；关闭登记资源 0。图层命中只计算 Alpha，美颜不改变该通道。缓存签名排除 PNG 正文，避免拖动时逐帧序列化图片。
+- Electron 定向检查 `validation/beauty/electron-check.cjs` 通过：真实完整人脸检测桥接、参数重置保留缓存、预设不含人物/图片，连续 12 次调节接受最后值 31，主线程继续 30 个 RAF，页面错误 0。证据 `electron-result.json`。
+- 原图对比、100% 局部预览、滤镜开关/排序/强度沿用统一窗口；图层面板布局保留。美颜缓存 PNG 和逐人参数保存在 `.ccomp` v10，读取 v1–v9；PSD/PNG/JPEG 烘焙。参数记忆/预设仅保存控制值。单人 ROI 4M 像素、每个美颜滤镜缓存 16M 像素上限；活跃模型输入属于软预算中不可临时淘汰的资源，关闭滤镜/文档明确释放。模型分析以保留的原素材为输入，源像素修改后需重新计算。
+- `npm run dist:lite` 已完成，安装包 1073630 字节、ZIP 1262616 字节；ZIP 完整性通过且排除 Python 字节码缓存，模型单独下载约 470.4 MiB，不进主包。SHA256SUMS 已更新。用户确认保存关闭后，正式安装替换完成，退出码 0，188 个运行文件 SHA256 与最终 ZIP 一致；旧程序备份 `validation/beauty/install-backup-20261014-163012`。
+- 正式 WebView2 安装版的针对性检查通过：读取保存的美颜缓存，预览 Alpha 255，命中/同步合成/确认/合并可用，释放登记资源 0，页面错误 0。仅复查安装和相关编辑路径，未重复整套 AI 推理或其他功能测试。证据 `validation/beauty/install.json`、`installed-files.json`、`installed-smoke.json`、`editor-window.png`；外置 AI、用户配置和源文件保留，未提交/推送。
+
+## 当前开发版 — 可编辑滤镜系统①②③④，2026-10-14
+
+- `tests/filters.test.cjs` 4 项通过：v9/v8 格式与参数校验、3D LUT 采样/域/文件错误、多点/通道曲线与 PSD 控制点、USM/高反差/中值核。
+- `tests/filters.spec.cjs` 6 项通过：滤镜与旋转/蒙版/投影/混合组分块导出，全局滤镜坐标与局部/全幅一致，透明边缘及前段缓存复用，窗口操作/预设/保存重开/再次编辑/撤销，曲线/LUT 项目保存和 PNG 对照，大素材最新请求/界面响应/关闭释放。证据 `validation/filters/electron-verified.log`；未运行全仓库或其他功能测试。
+- 补充定点图像检查 `validation/filters/review/check.cjs`：非等比缩放零半径滤镜与原图差 0；16384×64 来源可烘焙 PSD、滤镜数据不重复应用、原图保持；平均滤镜在原透明区域产生的有效像素可合成和命中，释放后登记 0。
+- 原生 `scripts/native-filters.cjs` 通过：实际 v9 保存、原 PNG 保留、重开修改/撤销；8192×1024 素材连续调参仅返回最新 1 个，主线程继续 RAF，可见预览 480×320，登记资源约 43.7 MiB。高斯 GPU 浮点样本与 CPU 差 0，带硬阈值 USM 链走 CPU、对照差 0，PNG/100% 样本差 0；关闭最后文档资源登记 0，无页面错误。证据 `validation/filters/native-verified.log`、`native/result.json`。本轮原生样本为 RGB。
+- 最终安装退出码 0，171 个运行文件与构建 SHA256 一致；安装版只做启动、读取已保存参数、原图文件保持、预览实际像素与截图核对，未重跑整个引擎验收。曾发现预览临时图层缺少旋转字段导致空白，修复后安装版像素为 `[153,114,133,255]`，截图目视正常。证据 `installed-smoke.json`、`installed-window.png`、`installed-files.json`、`install.json`（同一目录）。
+- 安装包 1073651 字节、ZIP 1255717 字节，SHA256SUMS 已更新；旧版备份 `validation/filters/install-backup-20261014-125117`。新项目 v9 读取旧版本，滤镜栈编辑信息保存在 `.ccomp`；PSD 烘焙这些滤镜，原素材和 JPEG/PSD 最终输出尚未分页化。详情 [v9 格式](../docs/windows-format-v9.md)。
+
+## 当前开发版 — 应用图标，2026-10-14
+
+- 用户原图保留透明通道和构图；ICO 包含 16/24/32/48/64/128/256 尺寸，界面 PNG 为 512×512。小尺寸图标和安装版启动页目视检查通过。
+- `npm run dist:lite` 成功；安装器退出码 0，163 个安装运行文件 SHA256 与构建一致。正式程序、安装器、卸载器的 32×32 嵌入图标逐像素匹配新 ICO；桌面/开始菜单快捷方式目标正确，已通知 Windows 刷新图标。
+- 正式安装版 WebView2 定向检查：标题栏 23×23、启动图标 70×70，图片加载成功，透明底色、无旧边框、无反色滤镜、无页面错误。证据 `validation/icon/result.json`、`installed-files.json`、`shortcuts.json`、`installed-startup.png`、`icon-sizes.png`；脚本 `validation/icon/check-icon.cjs`。只检查图标，没有重复引擎测试。
+- 安装包 1058021 字节、ZIP 1228371 字节，SHA256SUMS 已更新；旧安装备份 `validation/icon/install-backup-20261014-114302`。
+
+## 当前开发版 — 第二阶段④⑤GPU 与大图分块，2026-10-14
+
+18 个唯一相关 Electron 场景通过；仅验证改动涉及的路径，没有全仓库测试、重装依赖或重做性能基线。
+
+- `tests/gpu-tiles.spec.cjs`：8 个场景。30 组混合/缩放/透明边缘对照；16 类调整的参数/透明度对照；可见纹理、平移复用、缩小层级且原图无 CPU 像素读取；高斯/方框 GPU 与整幅 CPU 及表面模糊回退对照；流式 PNG 阴影/羽化蒙版/曲线全图对照；真实上下文丢失/恢复；跨 GPU 块渐变与 CMYK/ICC 分块 PNG；帧缓冲失败清理全部半成品并回退、恢复。
+- `tests/local-redraw.spec.cjs`：3 个场景，保留 ROI、区外不变、阴影/蒙版/组/剪贴/采样相位及内容缓存失效。
+- `tests/performance.spec.cjs`：3 个场景，后台与同步合成对照、预算淘汰、关闭文档释放资源。
+- `tests/windows-seven.spec.cjs`：2 个场景，实际专用模糊预览/取消/确认/撤销，以及 CMYK/ICC/分层 PSD。
+- `tests/editor.spec.cjs`：2 个场景，实际文字/透明度/PNG/JPEG 导出，纸张/300 DPI 元数据导出。
+
+记录 `validation/gpu-tiles/targeted-final.log`（13 个通过，半透明 CMYK 渐变的直通 RGB 严格 2 级断言失败）；`cmyk-final.log` 以与其他透明边缘测试一致的预乘通道指标验收，通过补齐第 14 项；`allocation-fallback.log` 第 15 项；`image-export-ui.log`、`export-ui-fixed.log` 和 `export-ui.log` 的对应成功场景补齐第 16–18 项。半透明 CMYK 渐变直通 RGB 最大差 4，预乘通道不超过 3、Alpha 不超过 1；没有通过忽略透明边缘来放过错误。普通 RGB 混合边缘 Alpha 不超过 2、预乘通道不超过 3；16 类调整直通 RGBA 差不超过 2。旧测试的栅格化判断更新为当前“形状…”标签；文字编辑使用现有菜单命令，避免点击被折叠面板中的控件。没有修改产品面板。
+
+初次 GPU 模糊发现位图上下方向不一致，已纠正；上下文恢复过早的验证改为等候事件处理完成。真实 PSD 缩小时通用 mip 与原采样相位不一致，已采用对齐条件及原 Canvas 采样表面；重新对照最大差 1。后台 PNG 离屏目标缺少 style/dataset 已修复，实际宿主导出通过。以上失败均先定位再针对修复，没有扩大无关测试。
+
+`npm run dist:lite` 成功，正式安装版 `scripts/native-gpu-tiles.cjs` 通过：
+
+- 实际 Intel Graphics / D3D11，`software:false`；WebGL2 最大纹理 16384，浮点滤镜可用。
+- 16384² 画布 5%/100% 视口与 CPU 最大 RGBA 差 1/0；真实只读 3508×4961、36 层 PSD 使用 WebGL2，最大差 1。
+- 16384×512 PNG 分为 256 块，单次渲染目标 35088 像素（另有 16384×64 行带暂存），导出时主线程继续 11 个 RAF；源画布未创建 16384² RGBA 输出表面。
+- 实际 8192×1024 高斯模糊使用 GPU，确认、撤销/重做和真实 PNG 导出通过；输出 712914 字节，512/1024 边界及透明边缘与原 CPU 模糊局部参考差不超过 2；300 DPI pHYs 为 `[11811,11811,1]`。
+- 实际上下文丢失时自动回退 Canvas，颜色 `[18,52,86,255]` 正确，恢复后返回 WebGL2；关闭文档后登记缓存 0，无页面错误。
+
+安装退出码 0，162 个文件与最终构建 SHA-256 相同；EXE 775896 字节、ZIP 948779 字节，SHA256SUMS 已更新。备份 `validation/gpu-tiles/install-backup-20261014-064939`；安装/哈希/原生证据分别为 `install.json`、`installed-files.json`、`native/result.json`、`installed-native-final.log`（同一 gpu-tiles 目录）。没有结束用户进程或改写源 PSD、配置、外置 AI。
+
+限制：涉及背景的复杂穿透组、剪贴和 CMYK 校样回退 Canvas/ICC；文字/旋转/FX/蒙版/部分缩小需先缓存 Canvas 内容。表面/径向/动感/平均模糊有 CPU 或全局采样路径；JPEG/PSD 编码仍需全幅资源，源素材与已应用滤镜的最终像素表面尚未分页化。PNG 的最终压缩 Blob/base64 仍保留完整编码文件。512 MiB 是可回收资源软预算，不能当作进程/源图/GPU 总内存硬上限；单边仍为 16384。旧蒙版应用严格 PNG 等式问题沿用③的记录。
+
+## 当前开发版 — 第一阶段③后台计算与内存管理，2026-10-14
+
+14 个唯一相关 Electron 场景通过，没有全仓库测试或重装依赖：
+
+- `tests/background-memory.spec.cjs`：5 个场景。自动使已发送到 Worker 的旧请求失效并关闭输出位图、最新排队参数、前台优先、关闭旧缓存时重试新文档任务；像素调整仅传原图和复杂选区，与合成请求独立；分散编辑只读取两个 256×256 块，删除回到基图的差异，确认调整共享撤销基图；临时表面/数组复用和回收、后台新缓存优先淘汰、蒙版参数不复制像素；未知页面状态消息不抛主进程异常。
+- `tests/local-redraw.spec.cjs`：3 个场景。修改后的缓存淘汰/表面清理仍保持局部区域分配、完整视口对照、阴影/蒙版边缘、区外不变、缓存复用与内容/采样相位失效。
+- `tests/editor.spec.cjs`：3 个场景。绘画/橡皮擦/撤销，变换图层的矩形选区填充/绘画/清除，真实图像调整预览/取消/选区灰度/保存状态/单步撤销重做。
+- `tests/performance.spec.cjs`：3 个场景。Worker 与同步合成对照（文字/FX/蒙版/剪贴/CMYK/撤销像素更新）、统一预算淘汰、关闭文档后台资源释放。
+
+记录：`validation/stage3/targeted-final.log`（8）、`ui.log`（6）；`inflight.log` 加强同一场景的在途请求及位图关闭核对。最终 Worker 缓存额度还扣除目标/复杂选区表面，像素调整清理旧合成缓存；蒙版替换/删除清空生成表面。
+
+额外旧蒙版全流程在“应用蒙版前后完整 PNG 必须相同”的断言失败，不计入上述通过数。定向对照已安装②与当前模块，两者均出现 220 个边缘字节、最大 1 级的重采样差异：`validation/stage3/mask-baseline.json`；本轮没有修改蒙版应用的烘焙/采样路径。其他蒙版元数据及局部渲染验证通过。首次尝试导航至安装目录的基线测试被正常来源防护拒绝，触发用户截图的主进程异常；该临时测试已移除，随后在受信任页面仅导入对应模块比较，并修正非法状态事件的未捕获异常。
+
+`npm run dist:lite` 成功。原生 WebView2 构建及正式安装版 `scripts/native-background-memory.cjs` 通过：4096² 连续 20 个像素调整和 10 个调整层预览各仅最新请求返回位图；调整层计算期间主线程继续 52 个 RAF，真实参数输入最大 0.5 ms；取消恢复原图、确认/撤销重做、预览显示尺寸稳定、关闭文档登记资源 0，无页面错误。登记资源 0 只表示受管缓存已释放，整个进程/源图/GPU 不受 512 MiB 软预算完整约束。
+
+正式安装退出码 0，157 个安装文件与构建文件 SHA-256 一致；EXE 767473 字节，ZIP 936504 字节，SHA256SUMS 更新。旧安装备份 `validation/stage3/install-backup-20261014-054052`。记录 `validation/stage3/install.json`、`installed-files.json`、`native/result.json`、`installed-native-final.log`。没有结束用户进程、修改源项目或用户配置、外置 AI。
+
+## 当前开发版 — 第一阶段②真正局部重绘，2026-10-14
+
+脏区域按上一帧/当前帧的素材、效果及有 FX 的祖先组范围计算，只分配该区域的合成表面。局部补片使用全局视口像素坐标；图层/组内容缓存可复用整数显示像素平移，子像素相位和内容/样式/蒙版变化失效。所有交互和清晰预览共用视口网格及位图尺寸计算；松开后缓存最终可见像素，取消恢复按下前快照。Alt 步进滑轨默认隐藏，按住显示，松开/失焦隐藏。
+
+9 个相关 Electron 场景通过，没有全仓库测试。新增 `tests/local-redraw.spec.cjs` 覆盖真实 ROI 分配、阴影/描边/羽化/蒙版组/剪贴/穿透调整组、完整视口对照、缓存复用与内容替换失效；70% 透明背景、37.5%+125% DPI、100%、200% DPI 的按下/移动/松开/取消一致性、区外字节不变、轨迹不累计。相关旧用例覆盖拖动/多选、实际手柄/旋转/蒙版、Worker 对照与 Alt 滑轨。
+
+轻量构建及正式安装版 `scripts/native-local-redraw.cjs` 通过：只读真实 3508×4961、36 层 PSD，移动 `JOKER_二郎巡江fx`。可见 333882 像素，每帧合成 21164 / 20020 / 18900；每帧区外差异 0，按下/松开/清晰缓存完成的画面差异 0，取消恢复，Alt 显隐/失焦隐藏正确，无页面错误。记录 `validation/local-redraw/result.json`，当前指向正式安装目录。
+
+`npm run dist:lite` 成功，EXE 765808 字节，ZIP 933999 字节。用户确认保存并关闭后已替换正式安装，退出码 0，156 个构建文件与安装文件 SHA-256 一致。备份 `validation/local-redraw/install-backup-20261014-050058`，安装记录同目录 `install.json`、`installed-files.json`。保留用户配置、项目和外置 AI。仅运行必要的安装版定向验证。
+
+## 当前开发版 — 最小缩放与步进，2026-10-14
+
+先复现大画布缩小过程中两种显示几何，再修复导航预览与后台视口的物理尺寸/裁剪范围不一致，以及缩放到下限后仍重复刷新的问题。移动工具“对齐吸附”右侧新增 1%–20% 的 Alt 滚轮步进滑轨，默认 5%，本机记忆，不创建像素撤销快照。
+
+只验证 3 个相关 Electron 场景：`tests/zoom.spec.cjs` 的最小缩放及滑轨用例，加 `tests/windows-nine.spec.cjs` 的滚轮/抓手用例。覆盖缩放期间几何稳定、到最小后画面和渲染序号保持、步进位置/幅度、鼠标锚点、行单位、设置保留及普通滚轮平移。没有全仓库测试。
+
+正式安装版 `scripts/native-zoom.cjs` 通过：真实 Alt+滚轮默认单格约 1.05，16384² 画布缩至 5% 的预览始终为 820×799，到下限后 8 次滚轮保持画面及序号；关闭重启同一隔离配置后步进保留 3%，无页面错误。证据 `validation/zoom-step/result.json`。
+
+已替换安装，156 个安装文件与构建哈希一致。最新 EXE 765504 字节、ZIP 933184 字节，SHA256SUMS 更新。备份 `validation/zoom-step/install-backup-20261014-035342`，安装记录同目录 `install.json`、`installed-files.json`。用户配置、外置 AI、源项目保留。
+
+## 当前开发版 — 大画布预览修复，2026-10-14
+
+大于 8M 像素的文档使用显示分辨率的视口清晰预览，缩略图使用独立低分辨率全貌，避免预览分配完整超大合成位图。3 个相关 Electron 用例通过，覆盖 16384×16384 的视口分配、100% 单像素、2× DPI、平移后旧结果失效、缩略图完整内容、释放资源。没有运行全仓库测试。
+
+`scripts/native-large-canvas.cjs` 在最终安装版 WebView2 通过：真实 3508×4961、36 层排版 PSD 放大画布到 16384×16384，图层数量及所选素材几何保留，100% 显示、撤销/重做正常，关闭后登记资源 0，无页面错误。拟合视图位图 820×799，100% 位图 1010×799。宽 17717 的超限设置被拒绝且原尺寸保持。用户原文件和高度未知，此结果不是对其原始崩溃的精确复现。记录及截图：`validation/large-canvas/result.json`、`resized.png`。
+
+修复版已替换正式安装，156 个构建文件哈希一致。安装包 764910 字节、ZIP 932794 字节；旧程序备份 `validation/large-canvas/install-backup-20261014-034117`。安装记录及文件校验：同目录 `install.json`、`installed-files.json`。保留用户配置、项目和外置 AI。
+
+## 当前开发版 — 引擎优化第一阶段，2026-10-14
+
+20 个相关 Electron 用例及最终原生 WebView2 定向验证通过。覆盖局部重绘与完整合成对照、静止像素、FX/羽化蒙版/剪贴/调整层/CMYK、请求合并与取消、像素块撤销共享、关闭与切换、尺寸替换。原生调整预览验证最新参数、取消恢复、位图尺寸稳定、撤销/重做及关闭后的资源清理，无页面错误。没有运行全仓库测试。
+
+真实 3508×4961、36 层 PSD 原生对比：第一次拖动更新 152.4→39.5 ms，拖动更新中位数 16.1→10.6 ms，拖动帧间隔 P95 150→33.3 ms，检查点与 100 ms 持续采样所见最大进程工作集 2.99→2.31 GiB。工作集相加包含共享页，结果仅代表本机样本。详细范围、限制和证据见 `ENGINE_OPTIMIZATION.md`。
+
+`npm run build:lite` 成功。原生结果：`validation/stage1/native/result.json`。性能记录：`validation/performance/stage1-baseline-measured-ui.json`、`stage1-measured-ui.json`。随后按用户要求重新打包并覆盖现有轻量版安装，156 个安装文件与构建产物的 SHA-256 一致，桌面快捷方式指向安装目录，已安装程序通过定向原生验证，无页面错误。安装包 764867 字节，ZIP 932511 字节；旧程序已备份，用户配置、外置 AI 和项目保留。记录：`validation/stage1/install.json`、`installed-files.json`、`installed-native.json`。
+
 ## 当前开发版 — 首选项
 
 “编辑 → 首选项…”及 Ctrl+K 可从主页进入。定向 Electron UI 用例 `tests/preferences.spec.cjs` 验证取消不保存、保存后画布背景和透明网格生效、对齐吸附联动、撤销步数限制、最近项目显示数量、重启恢复和恢复默认。原生 WebView2 用例 `tests/preferences-native.cjs` 验证菜单入口、保存、重启恢复及 Ctrl+K。运行 `npm run build:lite` 后在本机通过；使用隔离配置，没有改动正式安装或用户项目。此项尚未发布为安装包。

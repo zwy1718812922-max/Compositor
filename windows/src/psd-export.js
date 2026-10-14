@@ -1,11 +1,14 @@
 import { affine } from './affine.mjs';
 import { canvas, serialize, bounds, layerTransform, transformPoint, drawLayer, composite, textFont, layerSurface } from './editor.js';
 import { checkSize, rasterize } from './operations.js';
-function bake(target, draw, background) {
+import {filterPadding} from './filter-model.mjs';
+function bake(target, draw, background,padding=0,clip) {
   const size = target.canvas ? { width: target.canvas.width, height: target.canvas.height } : bounds(target);
-  const points = [{ x: 0, y: 0 }, { x: size.width, y: 0 }, { x: size.width, y: size.height }, { x: 0, y: size.height }].map(p => transformPoint(target, p));
-  const x = Math.floor(Math.min(...points.map(p => p.x))), y = Math.floor(Math.min(...points.map(p => p.y)));
-  const width = Math.max(1, Math.ceil(Math.max(...points.map(p => p.x))) - x), height = Math.max(1, Math.ceil(Math.max(...points.map(p => p.y))) - y);
+  const points = [{ x: -padding, y: -padding }, { x: size.width+padding, y: -padding }, { x: size.width+padding, y: size.height+padding }, { x: -padding, y: size.height+padding }].map(p => transformPoint(target, p));
+  let x = Math.floor(Math.min(...points.map(p => p.x))), y = Math.floor(Math.min(...points.map(p => p.y)));
+  const right=Math.ceil(Math.max(...points.map(p=>p.x))),bottom=Math.ceil(Math.max(...points.map(p=>p.y)));
+  let width = Math.max(1, right-x), height = Math.max(1, bottom-y);
+  if(clip&&(width>16384||height>16384)){x=Math.max(0,x);y=Math.max(0,y);width=Math.max(1,Math.min(clip.width,right)-x);height=Math.max(1,Math.min(clip.height,bottom)-y);}
   checkSize(width, height); const result = canvas(width, height), ctx = result.getContext('2d');
   if (background !== undefined) { ctx.fillStyle = `rgb(${background},${background},${background})`; ctx.fillRect(0, 0, width, height); }
   ctx.translate(-x, -y); draw(ctx);
@@ -20,7 +23,7 @@ export function preparePsd(project) {
       const raw = ['text','shape'].includes(layer.type) ? rasterize(layer) : layer;
       const safe = { ...raw, mask: undefined, opacity: 1, visible: true, blend: 'source-over' };
       // Text's actual ink may extend above its top baseline. Render through rasterize.
-      Object.assign(converted, bake(raw, ctx => drawLayer(ctx, safe))); converted.type = 'raster';if(layer.type==='fill'&&['solid','gradient'].includes(layer.fill.kind)&&(layer.fill.alpha??1)===1&&layer.x===0&&layer.y===0&&layer.scale===1&&(layer.scaleY??1)===1&&!layer.rotation&&!layer.skew)converted.psdFill=layer.fill;
+      Object.assign(converted, bake(raw, ctx => drawLayer(ctx, safe,project),undefined,filterPadding(raw.filters),raw.filters?.length?project:undefined));delete converted.filters; converted.type = 'raster';if(layer.type==='fill'&&['solid','gradient'].includes(layer.fill.kind)&&(layer.fill.alpha??1)===1&&layer.x===0&&layer.y===0&&layer.scale===1&&(layer.scaleY??1)===1&&!layer.rotation&&!layer.skew)converted.psdFill=layer.fill;
       for (const key of ['text', 'font', 'fontSize', 'color', 'bold']) delete converted[key];
       if (layer.type === 'text') {
         const [a,b,c,d] = affine(layer);

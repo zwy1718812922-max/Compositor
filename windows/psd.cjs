@@ -94,7 +94,7 @@ function readPsdDocument(buffer,profile,options = {}) {
   let resolution = psd.imageResources?.resolutionInfo?.horizontalResolution || 72;
   if (psd.imageResources?.resolutionInfo?.horizontalResolutionUnit === 'PPCM') resolution *= 2.54;
   resolution = Math.max(1, Math.min(9600, resolution));
-  const project = { format: 'com.compositor.windows', version: 8,colorMode:psd.colorMode===4?'CMYK':'RGB',...(profile?{colorProfile:{name:profile.name,data:Buffer.from(profile.bytes).toString('base64')}}:{}), width: psd.width, height: psd.height, resolution, colorSpace: 'sRGB', guides:(psd.imageResources?.gridAndGuidesInformation?.guides||[]).slice(0,200).map(g=>({id:crypto.randomUUID(),axis:g.direction==='vertical'?'x':'y',position:g.location})), layers: [], activeId: '' };
+  const project = { format: 'com.compositor.windows', version: 10,colorMode:psd.colorMode===4?'CMYK':'RGB',...(profile?{colorProfile:{name:profile.name,data:Buffer.from(profile.bytes).toString('base64')}}:{}), width: psd.width, height: psd.height, resolution, colorSpace: 'sRGB', guides:(psd.imageResources?.gridAndGuidesInformation?.guides||[]).slice(0,200).map(g=>({id:crypto.randomUUID(),axis:g.direction==='vertical'?'x':'y',position:g.location})), layers: [], activeId: '' };
   if (!count) {
     const pixels = (profile?psd.imageData:getCompositeImageData(psd));
     if (!pixels) throw new Error('PSD 包含未支持的内容，且没有可用的合成预览。请先栅格化相关图层。');

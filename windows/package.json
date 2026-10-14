@@ -46,6 +46,7 @@
       "native/Fonts.cs",
       "native/fonts.ps1",
       "ai/**/*",
+      "!ai/**/__pycache__/**/*",
       "ai-service.cjs",
       "psd-adjustments.cjs",
       "cmyk-psd.cjs"

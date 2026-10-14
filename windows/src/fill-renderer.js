@@ -1,5 +1,6 @@
-import { canvas, maskSurface } from './editor.js';
+import { canvas,maskPixels,pixelRegion } from './editor.js';
 import { adjustPixels } from './fill-model.mjs';
+import {takePixels,returnPixels} from './pixel-buffers.js';
 export function fillSurface(layer) {
  const key=JSON.stringify([layer.width,layer.height,layer.fill]);if(layer._fill?.key===key)return layer._fill.canvas;
  const c=canvas(layer.width,layer.height),ctx=c.getContext('2d');paintFill(ctx,layer);layer._fill={key,canvas:c};return c;
@@ -18,8 +19,11 @@ export function paintFill(ctx,layer) {
  ctx.save();ctx.globalAlpha*=f.alpha??1;ctx.fillRect(0,0,layer.width,layer.height);ctx.restore();
 }
 export function applyAdjustment(ctx,project,layer) {
- const before=ctx.getImageData(0,0,ctx.canvas.width,ctx.canvas.height),data=new Uint8ClampedArray(before.data);adjustPixels(data,layer.adjustment.kind,layer.adjustment.values);
- const mask=layer.mask?.enabled?maskSurface(project,layer.mask).getContext('2d').getImageData(0,0,project.width,project.height).data:null;
+ const r=pixelRegion(ctx.canvas,project);if(!r.width||!r.height)return;
+ const before=ctx.getImageData(r.localX,r.localY,r.width,r.height),data=takePixels(before.data.length);data.set(before.data);
+ try{adjustPixels(data,layer.adjustment.kind,layer.adjustment.values);
+ const mask=layer.mask?.enabled?maskPixels(project,layer.mask,r):null;
  for(let i=0;i<data.length;i+=4){const a=layer.opacity*(mask?mask[i+3]/255:1);for(let c=0;c<3;c++)before.data[i+c]=before.data[i+c]*(1-a)+data[i+c]*a;}
- ctx.putImageData(before,0,0);
+ ctx.putImageData(before,r.localX,r.localY);
+ }finally{returnPixels(data,project._owner||project);}
 }

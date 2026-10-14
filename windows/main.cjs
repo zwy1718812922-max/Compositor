@@ -17,11 +17,12 @@ function processPsd(action,payload) {
 }
 let win, dirty = false, currentPath = null, pendingPath = null;
 const index = pathToFileURL(path.join(__dirname, 'src/index.html')).href;
+const isTrusted = event => event.sender === win.webContents && event.senderFrame?.url === index;
 app.commandLine.appendSwitch('lang', 'zh-CN');
 app.setName('Compositor 中文版');
 const send = command => win.webContents.send('command', command);
 function trusted(event) {
-  if (event.sender !== win.webContents || event.senderFrame?.url !== index) throw new Error('拒绝未知页面的请求。');
+  if (!isTrusted(event)) throw new Error('拒绝未知页面的请求。');
 }
 function handle(name, callback) {
   ipcMain.handle(name, async (event, ...args) => {
@@ -49,7 +50,7 @@ app.whenReady().then(() => {
     { label: '图层(&L)', submenu: [item('新建图层', 'Ctrl+Shift+N', 'addLayer'), item('复制图层', 'Ctrl+J', 'duplicate'), item('删除图层', undefined, 'deleteLayer'), item('向上移动', undefined, 'raise'), item('向下移动', undefined, 'lower'), item('创建图层组', 'Ctrl+G', 'group'), item('取消分组', 'Ctrl+Shift+G', 'ungroup'), item('创建 / 释放剪贴蒙版', 'Ctrl+Alt+G', 'clipping'), { type: 'separator' }, item('栅格化文字', undefined, 'rasterize'), item('向下合并', 'Ctrl+E', 'mergeDown'), item('合并可见图层', 'Ctrl+Shift+M', 'mergeVisible')] },
     { label: '图层样式', submenu: [item('自由变换','Ctrl+T','freeTransform'),item('图层样式…',undefined,'layerStyles'),item('清除图层样式',undefined,'clearStyles')] },
     { label: '选择(&S)', submenu: [item('全选', 'Ctrl+A', 'selectAll'), item('取消选区', 'Ctrl+D', 'deselect')] },
-    { label:'滤镜(&T)',submenu:[{label:'模糊',submenu:[['gaussian','高斯模糊…'],['box','方框模糊…'],['motion','动感模糊…'],['radial','径向模糊…'],['surface','表面模糊…'],['average','平均']].map(([kind,label])=>item(label,undefined,'blur:'+kind))},item('选择主体 / 移除背景…',undefined,'removeBackground')] },
+    { label:'滤镜(&T)',submenu:[item('编辑滤镜栈…',undefined,'filterStack'),item('AI 美颜…',undefined,'filter:beauty'),{label:'模糊',submenu:[['gaussian','高斯模糊…'],['box','方框模糊…'],['motion','动感模糊…'],['radial','径向模糊…'],['surface','表面模糊…'],['average','平均…']].map(([kind,label])=>item(label,undefined,'filter:'+kind))},...['usm','highpass','median','curves','lut'].map(kind=>item({usm:'USM 锐化…',highpass:'高反差保留…',median:'中值去噪…',curves:'曲线…',lut:'颜色查找 / LUT…'}[kind],undefined,'filter:'+kind)),item('选择主体 / 移除背景…',undefined,'removeBackground')] },
     { label: '视图(&V)', submenu: [item('标尺','Ctrl+R','toggleRulers'),item('参考线','Ctrl+;','toggleGuides'),item('适合窗口', 'Ctrl+0', 'fit'), item('实际像素', 'Ctrl+1', 'actual'), { label: '全屏', role: 'togglefullscreen' }] },
     { label: '帮助(&H)', submenu: [item('使用说明与快捷键', undefined, 'help'), { label: '关于 Compositor 中文版', click: () => dialog.showMessageBox(win, { type: 'info', title: '关于', message: 'Compositor 中文版 ' + app.getVersion(), detail: '基于 robbietilton/Compositor 的独立 Windows 核心功能移植。\n原项目及本移植使用 MIT 许可证。\n支持分层 PSD、图层组、像素蒙版、剪贴蒙版、绘画、中文文字、选区裁剪、渐变、调整与图片导入导出。' }) }] }
   ]));
@@ -60,7 +61,7 @@ app.whenReady().then(() => {
     else if (action === 'close') win.close();
     else throw new Error('未知窗口操作。');
   });
-  ipcMain.on('document:dirty', (event, value) => { trusted(event); dirty = Boolean(value); });
+  ipcMain.on('document:dirty', (event, value) => { if(isTrusted(event))dirty = Boolean(value); });
   const ai=require('./ai-service.cjs').createAiService(p=>{if(!win.isDestroyed())win.webContents.send('ai:progress',p);});
   handle('ai:run',p=>ai.run(p));handle('ai:cancel',()=>ai.cancel());win.on('closed',()=>ai.cancel());
   handle('fonts:list',()=>new Promise((resolve,reject)=>{require('node:child_process').execFile('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',path.join(__dirname.replace('app.asar','app.asar.unpacked'),'native','fonts.ps1')],{windowsHide:true,encoding:'utf8',maxBuffer:2*1024*1024},(error,out)=>error?reject(error):resolve(JSON.parse(out.replace(/^\uFEFF/,''))));}));

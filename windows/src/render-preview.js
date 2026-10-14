@@ -1,11 +1,26 @@
-import {canvas,renderInto,pixelRevision} from './editor.js';
+import {canvas,renderInto,pixelRevision,invalidateAppearance} from './editor.js';
+import {memoryBudget} from './memory-budget.mjs';
+import {releaseGPU} from './gpu-renderer.js';
+import {releaseFilters,prepareFilters} from './filter-renderer.js';
 // Preview pixels follow the view. Document pixels remain untouched for edits and export.
-const states=new WeakMap();
+const states=new WeakMap(),surfaces=new WeakMap();
 const MAX_PREVIEW_PIXELS=2*1024*1024,MAX_CACHE_BYTES=128*1024*1024;
-function surfaceCache(){
- const entries=new Map();let bytes=0;
- return{get(id){const e=entries.get(id);if(e){entries.delete(id);entries.set(id,e);}return e;},put(id,e){const old=entries.get(id);if(old)bytes-=old.surface.width*old.surface.height*4;entries.delete(id);entries.set(id,e);bytes+=e.surface.width*e.surface.height*4;while(bytes>MAX_CACHE_BYTES&&entries.size>1){const key=entries.keys().next().value,item=entries.get(key);entries.delete(key);bytes-=item.surface.width*item.surface.height*4;}},clear(){entries.clear();bytes=0;}};
+export function nativePreviewView(project,view={}){
+ // Interactive and background composites use the same pixel grid at every document size.
+ return {...view,matchDisplay:true};
 }
+export function previewSize(region,matchDisplay=true){
+ const measure=matchDisplay?value=>Math.ceil(value-1e-8):Math.round;
+ return{width:Math.max(1,measure(region.width*region.scale)),height:Math.max(1,measure(region.height*region.scale))};
+}
+function surfaceCache(owner){
+ const entries=new Map();let bytes=0;
+ function remove(id){const e=entries.get(id);if(e){bytes-=e.surface.width*e.surface.height*4;entries.delete(id);memoryBudget.delete(e);queueMicrotask(()=>{e.surface.width=e.surface.height=1;});}}
+ return{get(id){const e=entries.get(id);if(e){entries.delete(id);entries.set(id,e);memoryBudget.touch(e);}return e;},put(id,e){remove(id);const size=e.surface.width*e.surface.height*4;if(size>Math.min(MAX_CACHE_BYTES,memoryBudget.limit))return;entries.set(id,e);bytes+=size;memoryBudget.set(e,size,()=>remove(id),owner);while(bytes>MAX_CACHE_BYTES&&entries.size>1)remove(entries.keys().next().value);},delete:remove,clear(){for(const id of entries.keys())remove(id);}};
+}
+function releaseState(state){for(const proxy of state.layers.values())if(proxy.mask)invalidateAppearance(proxy.mask);state.layers.clear();}
+export function releasePreview(project,target){const targets=states.get(project);if(targets){for(const [key,state] of targets)if(!target||key===target){releaseState(state);targets.delete(key);}if(!targets.size)states.delete(project);}if(!target){surfaces.get(project)?.clear();surfaces.delete(project);releaseGPU(project);releaseFilters(project);for(const l of project.layers||[])for(const item of [l,l.mask].filter(Boolean)){invalidateAppearance(item);delete item._fill;}}}
+export async function preparePreviewFilters(project,view={},valid){const r=previewRegion(project,view),{width,height}=previewSize(r,view.matchDisplay),layers=project.layers.map(l=>({...l,x:(l.x-r.x)*r.scale,y:(l.y-r.y)*r.scale,scale:l.scale*r.scale,scaleY:(l.scaleY??l.scale)*r.scale,_filterRevision:pixelRevision(l.canvas),_filterBackend:view.backend||project._backend}));return prepareFilters({layers,_owner:project},view.clip||{x:0,y:0,width,height},valid);}
 export function previewRegion(project,view={}){
  if(view.source)return {x:0,y:0,width:project.width,height:project.height,scale:1};
  if(view.matchDisplay&&view.scale&&view.width&&view.height&&view.pan){
@@ -27,9 +42,10 @@ export function previewRegion(project,view={}){
  return{x,y,width,height,scale};
 }
 export function renderPreview(target,project,background,proof=true,view={}){
+ target.style??={};target.dataset??={};
  const region=previewRegion(project,view),{scale}=region,key=JSON.stringify(region);
- let targets=states.get(project);if(!targets){targets=new WeakMap();states.set(project,targets);}let state=targets.get(target);
- if(!state||state.key!==key){state={key,layers:new Map(),cache:surfaceCache()};targets.set(target,state);}
+ let targets=states.get(project);if(!targets){targets=new Map();states.set(project,targets);}let state=targets.get(target);
+ if(!state||state.key!==key){if(state)releaseState(state);let cache=surfaces.get(project);if(!cache){cache=surfaceCache(project);surfaces.set(project,cache);}state={key,layers:new Map(),cache};targets.set(target,state);}
  const layers=project.layers.filter(layer=>layer.id!==view.editingId).map(layer=>{
   let proxy=state.layers.get(layer.id);if(!proxy){proxy={};state.layers.set(layer.id,proxy);}
   const oldBounds=proxy._bounds,oldBitmap=proxy.canvas,oldRevision=proxy._revision,oldMask=proxy.mask;
@@ -37,22 +53,24 @@ export function renderPreview(target,project,background,proof=true,view={}){
   Object.assign(proxy,layer,{x:(layer.x-region.x)*scale,y:(layer.y-region.y)*scale,scale:layer.scale*scale,scaleY:(layer.scaleY??layer.scale)*scale});
   if(layer.artboard)proxy.artboard={...layer.artboard,width:layer.artboard.width*scale,height:layer.artboard.height*scale};
   proxy._pattern=layer._pattern;
+  proxy._filterBackend=view.backend||project._backend;
   proxy._revision=pixelRevision(layer.canvas);
   proxy._bounds=layer._bounds||(oldBitmap===layer.canvas&&oldRevision===proxy._revision?oldBounds:undefined);
   const styleKey=JSON.stringify(layer.styles);
   if(proxy._styleKey!==styleKey){proxy._styleKey=styleKey;proxy._styles=layer.styles&&Object.fromEntries(Object.entries(layer.styles).map(([key,e])=>[key,{...e,...(e.size===undefined?{}:{size:e.size*scale}),...(e.distance===undefined?{}:{distance:e.distance*scale})}]));}
   proxy.styles=proxy._styles;
-  if(layer.mask){const m=layer.mask;proxy.mask={...m,x:(m.x-region.x)*scale,y:(m.y-region.y)*scale,scale:m.scale*scale,scaleY:(m.scaleY??m.scale)*scale,feather:m.feather*scale,_surface:oldMask?.canvas===m.canvas?oldMask._surface:undefined};}
-  else delete proxy.mask;
+  if(layer.mask){const m=layer.mask;if(oldMask?.canvas!==m.canvas&&oldMask)invalidateAppearance(oldMask);proxy.mask=Object.assign(oldMask||{},{...m,x:(m.x-region.x)*scale,y:(m.y-region.y)*scale,scale:m.scale*scale,scaleY:(m.scaleY??m.scale)*scale,feather:m.feather*scale,_surface:oldMask?.canvas===m.canvas?oldMask._surface:undefined});}
+  else{if(oldMask)invalidateAppearance(oldMask);delete proxy.mask;}
   return proxy;
  });
- for(const id of state.layers.keys())if(!project.layers.some(l=>l.id===id))state.layers.delete(id);
- const measure=view.matchDisplay?Math.ceil:Math.round;
- const width=Math.max(1,measure(region.width*scale)),height=Math.max(1,measure(region.height*scale));
- if(target.width!==width)target.width=width;if(target.height!==height)target.height=height;
+ for(const id of state.layers.keys())if(!project.layers.some(l=>l.id===id)){const proxy=state.layers.get(id);if(proxy.mask)invalidateAppearance(proxy.mask);state.layers.delete(id);state.cache.delete(id);}
+ const {width,height}=previewSize(region,view.matchDisplay),patch=view.patch&&view.clip;
+ const targetWidth=patch?patch.width:width,targetHeight=patch?patch.height:height;
+ if(target.width!==targetWidth)target.width=targetWidth;if(target.height!==targetHeight)target.height=targetHeight;
+ target._originX=patch?patch.x:0;target._originY=patch?patch.y:0;
  target.style.width=region.width+'px';target.style.height=region.height+'px';target.style.left=region.x+'px';target.style.top=region.y+'px';
  target.dataset.originX=region.x;target.dataset.originY=region.y;target.dataset.worldWidth=region.width;target.dataset.worldHeight=region.height;
- const preview={...project,width,height,layers,_renderCache:state.cache};
+ const preview={...project,width,height,layers,_owner:project,_renderCache:state.cache,_renderRegion:view.clip,_backend:view.backend||project._backend};
  renderInto(target,preview,background,proof);
  target.dataset.quality=view.source?'native':'preview';
  target.dataset.renderSerial=Number(target.dataset.renderSerial||0)+1;

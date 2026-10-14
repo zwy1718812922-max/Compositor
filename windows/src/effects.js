@@ -1,4 +1,4 @@
-import { hasEffects, defaultEffect } from './effect-model.mjs';
+import { hasEffects, defaultEffect, effectPadding } from './effect-model.mjs';
 const bitmap = (w, h) => { const c = typeof document==='undefined' ? new OffscreenCanvas(w,h) : document.createElement('canvas'); c.width = w; c.height = h; return c; };
 const rgb = color => color.slice(1).match(/../g).map(v => parseInt(v, 16));
 const clamp = v => Math.max(0, Math.min(1, v));
@@ -50,7 +50,7 @@ export function applyEffects(raw, layer,region) {
   for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) if (all[(y * sw + x) * 4 + 3]) { left = Math.min(left, x+sx); top = Math.min(top, y+sy); right = Math.max(right, x+sx); bottom = Math.max(bottom, y+sy); }
   if (right < left) return raw;
   const styles = layer.stylesEnabled === false ? {} : layer.styles || {};
-  const pad = Math.ceil(Math.max(2, ...Object.values(styles).filter(e => e.enabled).map(e => (e.distance || 0) + (e.size || 0) * 3 + 2)));
+  const pad = effectPadding(layer);
   const originX = left, originY = top, inkWidth = right - left + 1, inkHeight = bottom - top + 1;
   left = Math.max(0, left - pad); top = Math.max(0, top - pad); right = Math.min(w0 - 1, right + pad); bottom = Math.min(h0 - 1, bottom + pad);
   const w = right - left + 1, h = bottom - top + 1, src = raw.getContext('2d').getImageData(left, top, w, h), alpha = new Float32Array(w * h);

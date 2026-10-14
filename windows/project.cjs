@@ -7,6 +7,7 @@ const {decompose}=require('./src/affine.mjs');
 const { validateFill,validateAdjustment }=require('./src/fill-model.mjs');
 const {validateShape}=require('./src/shape-model.mjs');
 const {validateArtboard}=require('./src/artboard-model.mjs');
+const {validateFilters}=require('./src/filter-model.mjs');
 const FORMAT = 'com.compositor.windows';
 const MAX_BYTES = Infinity;
 const blends = ['source-over', 'multiply', 'screen', 'overlay', 'darken', 'lighten', 'difference', 'soft-light', 'hard-light'];
@@ -20,7 +21,7 @@ function pngPixels(data, limit = 16384) {
   return w * h;
 }
 function validateProject(p, allowPixels = false) {
-  if (!p || p.format !== FORMAT || ![1, 2, 3, 4, 5, 6, 7, 8].includes(p.version)) throw new Error('不支持的项目格式或版本。请打开 .ccomp 项目。');
+  if (!p || p.format !== FORMAT || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(p.version)) throw new Error('不支持的项目格式或版本。请打开 .ccomp 项目。');
   const limit = p.version === 1 ? 4096 : 16384;
   if (![p.width, p.height].every(n => Number.isInteger(n) && number(n, 1, limit)) || p.width * p.height > 16384 * 16384) throw new Error('画布尺寸超过此项目版本的限制。');
   if (p.version >= 2 && (!number(p.resolution, 1, 9600) || p.colorSpace !== 'sRGB')) throw new Error('分辨率或颜色空间无效。');
@@ -45,6 +46,7 @@ function validateProject(p, allowPixels = false) {
     if (l.parentId !== undefined && l.parentId !== null && typeof l.parentId !== 'string') throw new Error('图层组引用无效。');
     if (p.version < 4 && (l.styles || l.fillOpacity !== undefined || l.textMode || l.textRasterCache)) throw new Error('图层样式和段落文字需要 v4 项目格式。');
     if (l.styles) validateStyles(l.styles);
+    if(l.filters!==undefined){if(p.version<9||l.type!=='raster')throw new Error('可编辑滤镜需要 v9 像素图层。');validateFilters(l.filters);if(p.version<10&&l.filters.some(f=>f.kind==='beauty'))throw new Error('美颜滤镜需要 v10 项目。');}
     if (l.stylesEnabled !== undefined && typeof l.stylesEnabled !== 'boolean' || l.fillOpacity !== undefined && !number(l.fillOpacity, 0, 1)) throw new Error('图层样式或填充不透明度无效。');
     for (const key of ['textRasterCache','stylesModified']) if (l[key] !== undefined && typeof l[key] !== 'boolean') throw new Error('文字缓存或样式修改标志无效。');
     if (l.psdEffects && JSON.stringify(l.psdEffects).length > 65536) throw new Error('PSD 样式元数据过大。');
@@ -52,7 +54,7 @@ function validateProject(p, allowPixels = false) {
     if(l.artboard){if(p.version<7||l.type!=='group'||l.parentId)throw new Error('画板需要 v7 根级图层组。');validateArtboard(l.artboard);}
     if(l.type==='shape'){validateShape(l.shape);if(l.shape.vertexRadii&&p.version<8)throw new Error('顶点圆角需要 v8。');}
     else if(l.type==='fill'){validateFill(l);if(l.fill.alpha!==undefined&&(p.version<7||!number(l.fill.alpha,0,1)))throw new Error('填充透明度需要 v7。');if(p.version<7)pixels+=l.width*l.height;if(l.fill.data)pixels+=pngPixels(l.fill.data,512);}
-    else if(l.type==='adjustment')validateAdjustment(l);
+    else if(l.type==='adjustment'){validateAdjustment(l);if(p.version<9&&(l.adjustment.values.points||l.adjustment.values.lut))throw new Error('多点曲线和导入 LUT 需要 v9。');}
     else if (l.type === 'raster') {
       pixels += bitmapPixels(l);
     } else if (l.type === 'text') {

@@ -1,6 +1,6 @@
 # Compositor project format, versions 1–11
 
-The independent Chinese Windows port uses .ccomp v8 with editable shapes, artboards, paragraph properties, color modes, affine transforms, fill/adjustment layers, guides, groups, masks, clipping and resolution metadata; it reads v1–v7 files. See [Windows project format](../windows/FORMAT.md). This does not change the macOS .comp schema or ProjectManifest.current.
+The independent Chinese Windows port uses .ccomp v9 with editable filter stacks, curves and 3D LUTs, shapes, artboards, paragraph properties, color modes, affine transforms, fill/adjustment layers, guides, groups, masks, clipping and resolution metadata; it reads v1–v8 files. See [Windows project format](../windows/FORMAT.md). This does not change the macOS .comp schema or ProjectManifest.current.
 
 A `.comp` file is a macOS document package containing `manifest.json` and an `images/` directory of `<layer UUID>.png` assets.
 
@@ -52,3 +52,5 @@ Pixel layer records may include optional `text` metadata: content, PostScript fo
 ### Layer effects
 
 An optional `effects` record contains independent `stroke`, `shadow`, `colorOverlay`, `innerShadow`, `outerGlow` and `innerGlow` records. Stroke carries a size (0–500 layer pixels), a color, an opacity and an `inside` flag choosing which side of the edge it sits on; drop shadow and inner shadow each carry an angle, a distance, a blur, a color and an opacity; color overlay carries a color and an opacity; outer glow and inner glow each carry a size (0–500 layer pixels), a color and an opacity. Each supports optional `enabled` visibility (missing means visible); hidden effects keep all parameters and remain listed under their layer. Effects, including their visibility, are saved and participate in document undo. Canvas previews run on a serial background worker with a shared pixel budget; exports render the full-resolution effects. A record omitting an effect means that layer does not have it, so older readers see the effects they understand and ignore the rest.
+
+Windows uses the independent `.ccomp` format; see [Windows v10 beauty filters](windows-format-v10.md). The macOS schema remains unchanged.

@@ -125,7 +125,7 @@ internal sealed class EditorWindow : Form {
                 var project=Json().DeserializeObject(Encoding.UTF8.GetString(bytes));pendingPath=file;return new {project,path=file,name};
             }
             case "project:save": {
-                var project=Object(Get(p,"project"));if(Field(project,"format")!="com.compositor.windows"||Number(Get(project,"version"))<1||Number(Get(project,"version"))>8)throw new Exception("项目格式无效。");
+                var project=Object(Get(p,"project"));if(Field(project,"format")!="com.compositor.windows"||Number(Get(project,"version"))<1||Number(Get(project,"version"))>10)throw new Exception("项目格式无效。");
                 var file=currentPath;if(file==null||Flag(Get(p,"saveAs")))file=SavePath("Compositor 项目|*.ccomp",file??"未命名.ccomp");if(file==null)return null;
                 var bytes=Encoding.UTF8.GetBytes(Json().Serialize(project));await Task.Run(()=>AtomicWrite(file,bytes));currentPath=file;return new {path=file,name=Path.GetFileNameWithoutExtension(file)};
             }

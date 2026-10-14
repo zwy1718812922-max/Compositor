@@ -1,0 +1,5 @@
+const cache={},keys=['compositor.filterDefaults','compositor.filterPresets'];let database;
+const ready=new Promise(resolve=>{try{const request=indexedDB.open('compositor-filters',1);request.onupgradeneeded=()=>request.result.createObjectStore('settings');request.onerror=()=>resolve();request.onsuccess=()=>{database=request.result;Promise.all(keys.map(key=>new Promise(done=>{const item=database.transaction('settings').objectStore('settings').get(key);item.onsuccess=()=>{cache[key]=item.result;done();};item.onerror=done;}))).then(resolve);};}catch{resolve();}});
+export async function loadFilterSettings(){await ready;for(const key of keys)if(!cache[key]){try{cache[key]=JSON.parse(localStorage.getItem(key))||{};}catch{cache[key]={};}}}
+export const filterSetting=key=>cache[key]||{};
+export async function saveFilterSetting(key,value){cache[key]=value;await ready;if(!database)throw new Error('无法保存滤镜设置，请检查应用存储空间。');await new Promise((resolve,reject)=>{const transaction=database.transaction('settings','readwrite');transaction.objectStore('settings').put(value,key);transaction.oncomplete=resolve;transaction.onerror=()=>reject(new Error('滤镜设置保存失败，请检查应用存储空间。'));});}

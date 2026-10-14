@@ -1,3 +1,4 @@
+import {applyCurves,applyLUT,validateCurves,validateLUT} from './filter-color.mjs';
 export const fillNames={solid:'纯色',gradient:'渐变',pattern:'图案'};
 // Each adjustment has editable controls; the same model is used for preview and export.
 export const adjustments={
@@ -19,6 +20,8 @@ export function defaults(kind){return Object.fromEntries((adjustments[kind]?.[1]
 const color=c=>c.slice(1).match(/../g).map(x=>parseInt(x,16));
 const clip=n=>Math.max(0,Math.min(255,n));
 export function adjustPixels(data,kind,p={}) {
+ if(kind==='curves'&&p.points)return applyCurves(data,p.points);
+ if(kind==='lookup'&&p.lut)return applyLUT(data,p.lut,(p.amount??100)/100);
  const filter=color(p.color||'#ec8d32'), end=color(p.color2||'#ffffff');
  for(let i=0;i<data.length;i+=4){let r=data[i],g=data[i+1],b=data[i+2],rgb=[r,g,b],l=r*.2126+g*.7152+b*.0722;
   if(kind==='brightness'){const c=(100+p.contrast)/100;rgb=rgb.map(v=>(v-127.5)*c+127.5+p.brightness);}
@@ -50,4 +53,6 @@ export function validateAdjustment(layer) {
  for(const [key,,def,min,max] of adjustments[a.kind][1])if(!Number.isFinite(a.values[key])||a.values[key]<min||a.values[key]>max)throw new Error('调整值超出范围。');
  for(const c of ['color','color2'])if(a.values[c]!==undefined&&!/^#[\da-f]{6}$/i.test(a.values[c]))throw new Error('调整颜色无效。');
  if(a.values.range!==undefined&&!['reds','neutrals','blacks','whites'].includes(a.values.range))throw new Error('可选颜色范围无效。');
+ if(a.values.points!==undefined){if(a.kind!=='curves')throw new Error('曲线参数无效。');validateCurves(a.values.points);}
+ if(a.values.lut!==undefined){if(a.kind!=='lookup')throw new Error('LUT 参数无效。');validateLUT(a.values.lut);}
 }

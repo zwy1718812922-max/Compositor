@@ -4,6 +4,7 @@ import {validateArtboard} from './artboard-model.mjs';
 import {validateStyles} from './effect-model.mjs';
 import {selectionPath} from './selections.js';
 import {affine,inverse,multiply,decompose} from './affine.mjs';
+import {takeSurface,returnSurface} from './render-surfaces.js';
 
 export function rectangle(start, end) {
   const x = Math.floor(Math.min(start.x, end.x)), y = Math.floor(Math.min(start.y, end.y));
@@ -106,13 +107,13 @@ export function rasterize(layer) {
   return { ...metadata, ...transformPoint(layer,{x:left,y:top}), type: 'raster', canvas: pixels };
 }
 
-export function adjustRaster(layer, original, selection, settings) {
-  const filtered = canvas(original.width, original.height), f = filtered.getContext('2d');
+export function adjustRaster(layer, original, selection, settings,owner=layer) {
+  const filtered = takeSurface(original.width, original.height), f = filtered.getContext('2d');
   f.filter = `brightness(${settings.brightness}%) contrast(${settings.contrast}%) saturate(${settings.saturation}%) hue-rotate(${settings.hue}deg) grayscale(${settings.grayscale}%) invert(${settings.invert}%) blur(${settings.blur}px)`;
   f.drawImage(original, 0, 0);
   if (!selection) return filtered;
-  const output = canvas(original.width, original.height), ctx = output.getContext('2d');
+  const output = takeSurface(original.width, original.height), ctx = output.getContext('2d');
   ctx.drawImage(original, 0, 0); ctx.save(); clipSelection(ctx, layer, selection);
   ctx.clearRect(0, 0, output.width, output.height); ctx.drawImage(filtered, 0, 0); ctx.restore();
-  return output;
+  returnSurface(filtered,owner);return output;
 }

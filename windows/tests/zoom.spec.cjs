@@ -1,0 +1,26 @@
+const {test,expect,_electron:electron}=require('@playwright/test'),path=require('node:path');
+let app,page,errors;
+test.beforeEach(async()=>{const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;app=await electron.launch({args:[path.join(__dirname,'..'),'--user-data-dir='+test.info().outputPath('profile')],env});page=await app.firstWindow();errors=[];page.on('pageerror',error=>errors.push(error.message));await expect(page.locator('#startup-screen')).toBeHidden();});
+test.afterEach(async()=>{if(app){await app.evaluate(({app})=>app.exit(0));await app.close();}expect(errors).toEqual([]);});
+async function command(action){const serial=await page.evaluate(()=>Number(document.body.dataset.commandSerial||0));await app.evaluate(({BrowserWindow},action)=>BrowserWindow.getAllWindows()[0].webContents.send('command',action),action);await page.waitForFunction(s=>Number(document.body.dataset.commandSerial||0)>s,serial);await page.waitForFunction(()=>document.body.getAttribute('aria-busy')==='false'||!!document.querySelector('dialog[open]'));}
+async function create(size){await command('new');await page.locator('[data-category=web]').click();await page.locator('[data-preset=web-1280]').click();await page.locator('#new-width').fill(String(size));await page.locator('#new-height').fill(String(size));await page.locator('#create-document').click();await expect(page.locator('#new-dialog')).toBeHidden();}
+async function wheel(deltaY,altKey=true,deltaMode=0){await page.locator('#viewport').evaluate((v,event)=>{const b=v.getBoundingClientRect();v.dispatchEvent(new WheelEvent('wheel',{...event,clientX:b.x+b.width*.37,clientY:b.y+b.height*.43,bubbles:true,cancelable:true}));},{deltaY,altKey,deltaMode});}
+async function view(){return page.locator('#canvas-wrap').evaluate(c=>{const m=new DOMMatrix(c.style.transform),b=document.querySelector('#viewport').getBoundingClientRect(),x=Math.floor(b.x+b.width*.37)-b.x,y=Math.floor(b.y+b.height*.43)-b.y;return{zoom:m.a,x:m.e,y:m.f,anchor:{x:(x-m.e)/m.a,y:(y-m.f)/m.a}};});}
+const settled=()=>page.waitForFunction(()=>document.querySelector('#canvas').dataset.quality==='native'&&document.querySelector('#viewport').dataset.viewUpdating==='false');
+test('大画布缩小预览尺寸稳定，到最小后继续滚轮不刷新画面',async()=>{
+ await create(16384);await command('actual');await settled();
+ await page.locator('#canvas').evaluate(c=>{window.zoomSizes=[];window.zoomObserver=new MutationObserver(()=>zoomSizes.push([c.width,c.height,c.style.width,c.style.height,c.style.left,c.style.top]));zoomObserver.observe(c,{attributes:true,attributeFilter:['width','height','style']});});
+ await wheel(100000);await settled();await expect(page.locator('#zoom-value')).toHaveText('5%');const samples=await page.evaluate(()=>{zoomObserver.disconnect();return zoomSizes;});expect(samples.length).toBeGreaterThan(0);expect(new Set(samples.map(s=>JSON.stringify(s))).size).toBe(1);
+ const before=await view(),pixels=await page.locator('#canvas').evaluate(c=>({serial:c.dataset.renderSerial,data:c.toDataURL()}));
+ for(let n=0;n<6;n++){await wheel(120);await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));}
+ expect(await view()).toEqual(before);expect(await page.locator('#canvas').evaluate(c=>({serial:c.dataset.renderSerial,data:c.toDataURL()}))).toEqual(pixels);
+ await wheel(-120);expect((await view()).zoom).toBeGreaterThan(before.zoom);
+});
+test('Alt 滚轮步进滑轨紧邻吸附，调节幅度、鼠标锚点和设置记忆正确',async()=>{
+ await create(640);const slider=page.locator('#zoom-step');await expect(page.locator('#zoom-step-control')).toBeHidden();await page.keyboard.down('Alt');const snap=await page.locator('#snap-enabled').locator('..').boundingBox(),control=await page.locator('#zoom-step-control').boundingBox();expect(control.x).toBeGreaterThanOrEqual(snap.x+snap.width);await expect(slider).toHaveValue('5');
+ await command('actual');await slider.fill('1');await command('actual');const before=await view();await wheel(-120);let after=await view();expect(after.zoom).toBeCloseTo(1.01,6);expect(after.anchor.x).toBeCloseTo(before.anchor.x,3);expect(after.anchor.y).toBeCloseTo(before.anchor.y,3);await wheel(120);expect((await view()).zoom).toBeCloseTo(1,6);
+ await slider.fill('20');await command('actual');await wheel(-120);expect((await view()).zoom).toBeCloseTo(1.2,6);await expect(page.locator('#zoom-step-value')).toHaveText('20%');
+ await page.keyboard.up('Alt');await expect(page.locator('#zoom-step-control')).toBeHidden();const panBefore=await view();await wheel(40,false);after=await view();expect(after.zoom).toBe(panBefore.zoom);expect(after.y).toBeCloseTo(panBefore.y-40,4);await page.keyboard.down('Alt');
+ await command('actual');await slider.fill('5');await command('actual');await wheel(-3,true,1);expect((await view()).zoom).toBeCloseTo(Math.pow(1.05,.4),4);
+ await slider.fill('3');await page.evaluate(()=>window.dispatchEvent(new Event('blur')));await expect(page.locator('#zoom-step-control')).toBeHidden();await page.keyboard.up('Alt');await page.reload();await expect(page.locator('#startup-screen')).toBeHidden();await expect(slider).toHaveValue('3');await expect(page.locator('#zoom-step-value')).toHaveText('3%');await expect(page.locator('#zoom-step-control')).toBeHidden();
+});

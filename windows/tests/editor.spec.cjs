@@ -35,7 +35,7 @@ async function drag(x1, y1, x2, y2) {
 }
 async function pixel(x, y) { return page.locator('#canvas').evaluate((c, p) => Array.from(c.getContext('2d').getImageData(Math.floor((p.x-Number(c.dataset.originX||0))*c.width/Number(c.dataset.worldWidth||c.width)),Math.floor((p.y-Number(c.dataset.originY||0))*c.height/Number(c.dataset.worldHeight||c.height)),1,1).data), { x, y }); }
 async function edit(id, value) {
-  if(id==='text-content'){if(!await page.locator('#inline-text').isVisible())await page.locator('#text-edit-inline').click();await page.locator('#inline-text').fill(String(value));await page.locator('#inline-text').press('Control+Enter');return;}
+  if(id==='text-content'){if(!await page.locator('#inline-text').isVisible())await menu('editText');await page.locator('#inline-text').fill(String(value));await page.locator('#inline-text').press('Control+Enter');return;}
   if (['layer-x', 'layer-y', 'layer-scale', 'layer-rotation', 'text-content', 'font-size'].includes(id)) await page.getByRole('button', { name: '属性面板', exact: true }).click();
   await page.locator('#' + id).fill(String(value)); await page.locator('#' + id).press('Tab');
 }

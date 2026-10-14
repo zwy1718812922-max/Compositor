@@ -1,0 +1,4 @@
+export function beautyBlob(data){const comma=data.indexOf(','),bytes=Uint8Array.from(atob(data.slice(comma+1)),c=>c.charCodeAt(0));return new Blob([bytes],{type:data.slice(5,data.indexOf(';'))});}
+const identities=new WeakMap();
+function key(data=''){let a=2166136261,b=3335557771;for(let i=0;i<data.length;i++){const c=data.charCodeAt(i);a=Math.imul(a^c,16777619);b=Math.imul(b^c,2246822519);}return[data.length,a>>>0,b>>>0].join(':');}
+export function compactFilters(stack){return stack?.map(filter=>{if(filter.kind!=='beauty')return filter;return{...filter,values:{...filter.values,faces:filter.values.faces.map(face=>{let old=identities.get(face);if(!old||old.blend!==face.blend||old.repair!==face.repair){old={blend:face.blend,repair:face.repair,id:key(face.blend)+'/'+key(face.repair)};identities.set(face,old);}const {blend,repair,...metadata}=face;return{...metadata,patchId:old.id};})}};});}

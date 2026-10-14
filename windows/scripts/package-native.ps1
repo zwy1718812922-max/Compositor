@@ -5,7 +5,18 @@ $version = (Get-Content -LiteralPath (Join-Path $windowsRoot 'package.json') -En
 $outputRoot = Join-Path $windowsRoot 'dist\lite-unpacked'
 $archive = Join-Path $windowsRoot "dist\Compositor-ZH-$version-x64-Lite.zip"
 if (!(Test-Path -LiteralPath (Join-Path $outputRoot 'Compositor 中文版.exe'))) { throw 'Build the native host before packaging.' }
-Compress-Archive -LiteralPath $outputRoot -DestinationPath $archive -CompressionLevel Optimal -Force
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archiveStream = [System.IO.File]::Open($archive,[System.IO.FileMode]::Create)
+try {
+    $zip = New-Object System.IO.Compression.ZipArchive($archiveStream,[System.IO.Compression.ZipArchiveMode]::Create,$true)
+    try {
+        foreach ($file in (Get-ChildItem -LiteralPath $outputRoot -Recurse -File | Where-Object { $_.FullName -notmatch '\\__pycache__\\' })) {
+            $entry = 'lite-unpacked/' + $file.FullName.Substring($outputRoot.Length+1).Replace('\','/')
+            [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip,$file.FullName,$entry,[System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+        }
+    } finally { $zip.Dispose() }
+} finally { $archiveStream.Dispose() }
 if (!$NsisCompiler) {
     $cacheRoot = Join-Path $env:LOCALAPPDATA 'electron-builder\Cache'
     $NsisCompiler = Get-ChildItem -LiteralPath $cacheRoot -Recurse -Filter makensis.exe | Where-Object { $_.Directory.Name -eq 'Bin' } | Select-Object -First 1 -ExpandProperty FullName

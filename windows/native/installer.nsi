@@ -40,7 +40,7 @@ Section "Compositor" SEC_MAIN
   Quit
   install_files:
   SetOutPath "$INSTDIR"
-  File /r "..\dist\lite-unpacked\*"
+  File /r /x __pycache__ "..\dist\lite-unpacked\*"
   WriteUninstaller "$INSTDIR\卸载.exe"
   ${GetParameters} $R0
   ClearErrors

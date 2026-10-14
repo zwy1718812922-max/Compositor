@@ -83,6 +83,7 @@ test('拖动图层时静止素材保持在快速预览，松开后恢复清晰�
     await page.mouse.move(p.x,p.y);await page.waitForTimeout(180);
     expect(await page.locator('#canvas').getAttribute('data-quality')).toBe('preview');
     expect(await geometry()).toEqual(initialGeometry);
+    const renderedPixels=Number(await page.locator('#canvas').getAttribute('data-rendered-pixels'));expect(renderedPixels).toBeGreaterThan(0);expect(renderedPixels).toBeLessThan(initialGeometry.width*initialGeometry.height/4);
     expect(await pixel(150,150)).toEqual(stationary);
     const currentRegion=await stationaryRegion();
     expect(currentRegion.reduce((count,value,index)=>count+(value!==initialRegion[index]),0)).toBe(0);

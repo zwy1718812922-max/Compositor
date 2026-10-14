@@ -1,0 +1,6 @@
+import {memoryBudget} from './memory-budget.mjs';
+const idle=new Set(),MAX_BYTES=32*1024*1024;let bytes=0;
+function remove(surface){if(idle.delete(surface)){bytes-=surface.width*surface.height*4;memoryBudget.delete(surface);}}
+function dispose(surface){remove(surface);surface.width=surface.height=1;}
+export function takeSurface(width,height){for(const surface of idle)if(surface.width===width&&surface.height===height){remove(surface);return surface;}const surface=typeof document==='undefined'?new OffscreenCanvas(width,height):document.createElement('canvas');surface.width=width;surface.height=height;return surface;}
+export function returnSurface(surface,owner){if(idle.has(surface))return;const size=surface.width*surface.height*4;if(size>Math.min(MAX_BYTES,memoryBudget.limit)){dispose(surface);return;}const ctx=surface.getContext('2d');if(ctx.reset)ctx.reset();else{ctx.setTransform(1,0,0,1,0,0);ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;ctx.filter='none';ctx.clearRect(0,0,surface.width,surface.height);}delete surface._originX;delete surface._originY;idle.add(surface);bytes+=size;memoryBudget.set(surface,size,()=>dispose(surface),owner,'temporary');while(bytes>MAX_BYTES)dispose(idle.values().next().value);}

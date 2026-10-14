@@ -8,3 +8,4 @@
 #transform-controls button[data-rotate-corner=ne]{left:auto!important;right:-23px;top:-23px!important}
 #transform-controls button[data-rotate-corner=se]{left:auto!important;right:-23px;top:auto!important;bottom:-23px}
 #transform-controls button[data-rotate-corner=sw]{left:-23px!important;top:auto!important;bottom:-23px}
+img.brand-icon{background:none;object-fit:contain}img.startup-logo{border:0;object-fit:contain}
